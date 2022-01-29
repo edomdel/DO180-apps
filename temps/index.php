@@ -3,41 +3,34 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-container-review - grading/setup script for DO180
+#     lab-container-create - setup script for DO180
 #
 # SYNOPSIS
-#     lab-example {start|grade|finish}
+#     lab-container-create {start|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
-#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures the Lab: Creating Containerized Services
+#     This script configures the Guided Exercise: Creating a MySQL Database Instance
 #
 # CHANGELOG
-#   * Fri Mar 19 2021 Federico Fapitalle <ffapital@redhat.com>
-#   - run podman as the student user
-#   * Thu Jan 17 2019 Dan Kolepp <dkolepp@redhat.com>
-#   - Renamed script to conform with new standards.
-#   - New verbs are start, grade, finish,
-#      (no longer setup, grade, cleanup)
-#   * Fri Abr 06 2017 Fernando Lozano <flozano@redhat.com>
-#   - original code
+#   * Fri Apr 23 2021 Federico Fapitalle <ffapital@redhat.com>
+#   - initial version
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='container-review'
+this='container-rootless'
 target='workstation'
-title='Lab: Creating Containerized Services'
+title='Guided Exercise: Exploring root and rootless containers'
 
-# This defines which subcommands are supported (solve, reset, etc.).
+# This defines which subcommands are supported (start, finish, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start grade finish)
+declare -a valid_commands=(start finish)
 
 # Additional functions for this grading script
 
@@ -57,43 +50,10 @@ function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
   check_podman_registry_config
-
-  grab_lab_files "false"
 }
-
-function lab_grade {
-  print_header "Grading the student's work for the ${title}"
-
-  pad " · The httpd container image was pulled"
-  num_images=$(sudo -u student podman images | grep "redhattraining/httpd-parent" | grep "2.4" | wc -l)
-  pass_if_NOT_equal "$num_images" "0"
-
-  pad " · The container was started with the correct name"
-  container_name=$(sudo -u student podman ps -a --format "{{ .Names }}" | grep "httpd-basic" | wc -l)
-  pass_if_NOT_equal "$container_name" "0"
-
-  pad " · The container was started with the correct image"
-  container=$(sudo -u student podman ps -a -f "name=httpd-basic" --format "{{ .Image }}" | grep "redhattraining/httpd-parent" | grep "2.4" | wc -l)
-  pass_if_NOT_equal "$container" "0"
-
-  pad " · Check the content of index.html"
-  page=$(curl -s http://localhost:8080/index.html | grep "Hello World" | wc -l)
-  pass_if_NOT_equal "$page" "0"
-
-  print_line
-}
-
-
 
 function lab_finish {
   print_header "Completing the ${title}"
-
-  pad ' · Removing "httpd-basic" container'
-  podman_rm_container_rootless "httpd-basic"
-
-  #Remove image from local cache?
-  pad ' · Removing "redhattraining/httpd-parent:2.4" image'
-  podman_rm_image_rootless "redhattraining/httpd-parent:2.4"
 }
 
 ############### Don't EVER change anything below this line ###############
