@@ -3,44 +3,49 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-image-operations - grading/setup script for DO180
+#     lab-image-review - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-image-operations {start|finish}
+#     lab-image-review {start|grade|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
+#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures GE: Creating a Custom Apache Container Image (4.2)
+#     This script configures Lab: Managing Images (4.5)
 #
 # CHANGELOG
-#   * Thur Mar 25 2021 Michael Jarrett <mjarrett@redhat.com>
-#   - Updated code for rootless podman
-#   * Fri Feb 01 2019 Eduardo Ramirez <eramirez@redhat.com>
-#   - Update to OCP4
-#   * Mon Jun 11 2018 Razique Mahroua <rmahroua@redhat.com>
-#   - Cleans the code
+#   * Mon Nov 30 2020 Michael Phillips <miphilli@redhat.com>
+#   - Changed the finish function to remove the quay.io image instead of the docker.io image.
+#   * Wed Mar 13 2019 Jordi Sola <jordisola@redhat.com>
+#   - Added validation for removed image
+#   * Thu Jan 31 2019 Jordi Sola <jordisola@redhat.com>
+#   - Updated to podman and renamed.
+#   * Wed Jun 13 2018 Razique Mahroua <rmahroua@redhat.com>
+#   - Reverts some changes after retrieval of the right image
+#   * Tue Jun 12 2018 Razique Mahroua <rmahroua@redhat.com>
+#   - Updates the images (Nginx -> Nginx)
+#   - Cleanup of the code
 #   * Fri Jun 08 2018 Artur Glogowski <aglogows@redhat.com>
-#   - Changed to version 3.9
-#   * Wed Mar 30 2017 Ricardo Jun <jtaniguc@redhat.com>
-#   - original code
+#   - Fixed for version 3.9
+#   * Wed Mar 29 2017 Ricardo Jun <jtaniguc@redhat.com>
 #   * Fri Mar 31 2017 Ricardo Jun <jtaniguc@redhat.com>
-#   - Implemented new checks
+#   - Fixed issues identified during peer review
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='lab-image-operations'
+this='image-review'
 target='workstation'
-title='GE: Creating a Custom Apache Container Image'
+title='Lab: Managing Images'
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start finish)
+declare -a valid_commands=(start grade finish)
 
 # Additional functions for this grading script
 
@@ -57,28 +62,61 @@ EOF
 }
 
 function lab_start {
-  print_header "Setting up ${target} for the ${title}"
+   print_header "Setting up ${target} for the ${title}"
 
+  #Remove once workstation is configured with
+  # registry.lab.example.com as a registry.
   check_podman_registry_config
+
+}
+
+function lab_grade {
+  print_header "Grading the student's work for the ${title}"
+
+  pad " · Nginx container image is pulled"
+  sudo -u student podman images | grep nginx > /dev/null
+  pass_if_equal $? 0
+
+  pad " · Container official-nginx is created"
+  sudo -u student podman ps -a | grep official-nginx > /dev/null
+  pass_if_equal $? 0
+
+  pad " · Container official-nginx is stopped"
+  sudo -u student podman ps | grep official-nginx > /dev/null
+  pass_if_NOT_equal $? 0
+
+  #When updated to Podman v1.0, we can move this to `sudo podman image exist`
+  pad " · Tag do180/mynginx:v1.0-SNAPSHOT is removed"
+  sudo -u student podman images | grep do180/mynginx | grep v1.0-SNAPSHOT > /dev/null
+  pass_if_NOT_equal $? 0
+
+  pad " · Tag do180/mynginx:v1.0 is created"
+  sudo -u student podman images | grep do180/mynginx | grep v1.0 > /dev/null
+  pass_if_equal $? 0
+
+  pad " · Container my-nginx is created and running"
+  sudo -u student podman ps | grep my-nginx > /dev/null
+  pass_if_equal $? 0
+
+  pad " · index.html is available with the custom content"
+  curl  --silent 127.0.0.1:8280  | grep Page &> /dev/null
+  pass_if_equal $? 0
+
 }
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  for container in official-httpd test-httpd; do
-    pad " · Stopping $container container"
-    podman_stop_container_rootless $container
-
-    pad " · Removing $container container"
-    podman_rm_container_rootless $container
+  for container in official-nginx-dev official-nginx ; do
+    pad " · Stopping $container container" && podman_stop_container_rootless $container
+    pad " · Removing $container container" && podman_rm_container_rootless $container
   done
 
-  for image in redhattraining/httpd-parent quay.io/${RHT_OCP4_QUAY_USER}/do180-custom-httpd localhost/do180-custom-httpd; do
-    pad " · Removing $image image"
-    podman_rm_image_rootless $image
+  for image in do180/mynginx:v1.0 quay.io/redhattraining/nginx:1.17 ; do
+    pad " · Removing $image image" && podman_rm_image_rootless $image
   done
+
 }
-
 
 ############### Don't EVER change anything below this line ###############
 
