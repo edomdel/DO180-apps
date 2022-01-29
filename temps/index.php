@@ -1,43 +1,48 @@
-#!/bin/bash
+#!/usr/bin/bash
 #
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-dockerfile-review - grading/setup script for DO180
+#     lab-image-operations - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-dockerfile-review {setup|grade|finish}
+#     lab-image-operations {start|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
-#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script is for lab 5.5 for building a custom apache image final lab.
+#     This script configures GE: Creating a Custom Apache Container Image (4.2)
 #
 # CHANGELOG
-#   * Mon Feb 11 2019 Eduardo Ramirez <eramirez@redhat.com>
-#   - Update to OCP 4
-#   * Mon Jun 11 2018 Artur Glogowski <aglogows@redhat.com>
-#   - Updated to version 3.9
-#   * Mon Apr 3 2017 Ravi Srinivasan <ravis@redhat.com>
-#   - Adapted for DO180
-#   * Tue Jan 14 2016 Zach Gutterman <zgutterm@redhat.com>
-#   - original code for DO276
+#   * Thur Mar 25 2021 Michael Jarrett <mjarrett@redhat.com>
+#   - Updated code for rootless podman
+#   * Fri Feb 01 2019 Eduardo Ramirez <eramirez@redhat.com>
+#   - Update to OCP4
+#   * Mon Jun 11 2018 Razique Mahroua <rmahroua@redhat.com>
+#   - Cleans the code
+#   * Fri Jun 08 2018 Artur Glogowski <aglogows@redhat.com>
+#   - Changed to version 3.9
+#   * Wed Mar 30 2017 Ricardo Jun <jtaniguc@redhat.com>
+#   - original code
+#   * Fri Mar 31 2017 Ricardo Jun <jtaniguc@redhat.com>
+#   - Implemented new checks
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='dockerfile-review'
+this='lab-image-operations'
 target='workstation'
-title='Lab: Creating Custom Container Images'
+title='GE: Creating a Custom Apache Container Image'
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start grade finish)
+declare -a valid_commands=(start finish)
+
+# Additional functions for this grading script
 
 function print_usage {
   local problem_name=$(basename $0 | sed -e 's/^lab-//')
@@ -54,67 +59,26 @@ EOF
 function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
-  cd /home/student
   check_podman_registry_config
-
-  pad " · Checking if the container exists or is running"
-
-  if [ -n podman_get_cid_by_name dockerfile ]; then
-	  print_FAIL
-	  print_line "The dockerfile container is running or it is in the cache. Remove it"
-  else
-	  print_SUCCESS
-  fi
-
-  grab_lab_files
 }
-
-function lab_grade {
-  print_header "Grading the student's work for ${title}"
-
-  pad " · Check for apache container image"
-  sudo -u student podman images | grep "custom-apache"
-  pass_if_equal $? 0
-
-  pad " · Check if the container is running"
-  cid=$(podman_get_cid_by_name containerfile)
-  pass_if_NOT_equal $cid ""
-
-  pad " · Verifying if httpd was installed correctly in apache image"
-  sudo -u student podman run --name lab-dockerfile-review-grader do180/custom-apache ls /usr/sbin | grep httpd
-  pass_if_equal $? 0
-
-  pad " · Verifying if hello world is running on server"
-  curl --silent 127.0.0.1:20080 | grep "The containerfile-review lab works"
-  pass_if_equal $? 0
-
-  print_line
-}
-
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  pad " · Stopping grade container"
-  podman_stop_container_rootless lab-dockerfile-review-grader
-  
-  pad " · Removing grade container"
-  podman_rm_container_rootless lab-dockerfile-review-grader
+  for container in official-httpd test-httpd; do
+    pad " · Stopping $container container"
+    podman_stop_container_rootless $container
 
-  pad " · Stopping running container"
-  podman_stop_container_rootless lab-dockerfile-review
+    pad " · Removing $container container"
+    podman_rm_container_rootless $container
+  done
 
-  pad " · Removing the container"
-  podman_rm_container_rootless lab-dockerfile-review
-
-  pad " · Removing do180/custom-apache container image"
-  podman_rm_image_rootless do180/custom-apache
-
-  pad " · Removing ubi8 container image"
-  podman_rm_image_rootless ubi8/ubi
-
-  print_line
+  for image in redhattraining/httpd-parent quay.io/${RHT_OCP4_QUAY_USER}/do180-custom-httpd localhost/do180-custom-httpd; do
+    pad " · Removing $image image"
+    podman_rm_image_rootless $image
+  done
 }
+
 
 ############### Don't EVER change anything below this line ###############
 
