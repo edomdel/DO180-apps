@@ -3,46 +3,51 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-manage-networking - grading/setup script for DO180
+#     lab-manage-review - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-manage-networking {start|finish}
+#     lab-manage-review {start|grade|finish}
 #
-#        start   - configures the environment at the start
-#                  of a lab or exercise.
-#        finish  - executes any administrative tasks after
-#                  completion of a lab or exercise.
+#        start   - configures the environment at the start of a lab or exercise.
+#        grade   - grades this lab
+#        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures Guided Exercise: Loading the Database
+#     This script configures Lab: Managing Containers
 #
 # CHANGELOG
-#   * Tue Mar 24 2021 Harpal Singh <harpasin@redhat.com>
-#   - Added new functions to stop, rm, rmi for rootless podman.
-#   * Tue Jan 29 2019 Dan Kolepp <dkolepp@redhat.com>
-#   - changed name from lab-load-mysqldb to
-#     lab-manage-networking, to conform to new naming
-#     standards.
-#   - updated verbs to start/finish from setup/cleanup
-#   - container engine changed from docker to podman.
-#   * Wed Jun 06 2018 Artur Glogowski <aglogows@redhat.com>
+#   * Tue Mar 25 2021 Harpal Singh <harpasin@redhat.com>
+#   - Changed functions to stop, rm, rmi for rootless podman.
+#   * Tue Nov 10 2020 Michael Phillips <miphilli@redhat.com>
+#   - changed the order of print_FAIL in a grading step
+#   *  Wed Jan 30 2019 Eduardo Ramirez <eramirez@redhat.com>
+#   - Replaced docker with podman
+#   - Use new functions
+#   - Use new verbs
+#   *  Wed Jun 06 2018 Artur Glogowski <aglogows@redhat.com>
 #   - changes related to version 3.9
-#   * Mon Mar 27 Richard Allred <rallred@redhat.com>
-#   - original code
+#   - added cleanup function
+#   * Mon Mar 27 2017 Richard Allred <rallred@redhat.com>
+#   - Initial code.
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this="manage-networking"
-title="Guided Exercise: Loading the Database"
+this="manage-review"
+title="Lab: Managing Containers"
 target='workstation'
+user="student"
+do180_home="/home/${user}/DO180"
+labs="${do180_home}/labs"
+solutions="${do180_home}/solutions"
+
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start finish)
+declare -a valid_commands=(start grade finish)
 
 # Additional functions for this grading script
 
@@ -61,52 +66,61 @@ EOF
 function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
-  #Remove once workstation is configured with
-  # registry.lab.example.com as a registry.
   check_podman_registry_config
 
-  print_line " · Creating a host directory for the database container:"
-  pad "   · Adding fcontext policy for /home/student/local/mysql"
-  if sudo semanage fcontext -a -t container_file_t '/home/student/local/mysql(/.*)?'; then
-    print_SUCCESS
-  else
-    print_line "Unable to add fcontext of 'container_file_t' for '/home/student/local/mysql(/.*)?'"
+  pad " · Check that /home/student/local/mysql does not exist"
+  if [ -d "/home/student/local/mysql" ]
+  then
     print_FAIL
-  fi
-
-  pad "   · Creating the /home/student/local/mysql directory"
-  if create_directory_rootless /home/student/local/mysql; then
-    print_SUCCESS
+    print_line "Please remove the directory: /home/student/local/mysql"
   else
-    print_FAIL
-  fi
-
-
-  pad "   · Apply fcontext policy to /home/student/local/mysql"
-  if sudo restorecon -Rv /home/student/local/mysql; then
     print_SUCCESS
-  else
-    print_FAIL
   fi
-
-  pad "   · Change owner of the /home/student/local/mysql to the mysql" && change_ownership_rootless /home/student/local/mysql
 
   grab_lab_files
-
-  print_line
 }
 
+function lab_grade {
+  print_header "Grading the student's work for the ${title}"
+
+  pad " · Checking if the /home/student/local/mysql folder exists"
+  if [ -d "/home/student/local/mysql" ]; then
+        print_PASS
+  else
+        print_FAIL
+  fi
+
+  pad " · Checking if owner was changed"
+  if [ -d "/home/student/local/mysql" ]; then
+        USER=`ls -ld /home/student/local/mysql | awk '{ print $3 }'`
+        GROUP=`ls -ld /home/student/local/mysql | awk '{ print $4 }'`
+        if ( [ $USER == "mysql" ] || [ $USER == 27 ] || [ $USER == 100026 ] ) && ( [ $GROUP == "mysql" ] || [ $GROUP == 27 ] || [ $GROUP == 100026 ] ); then
+                print_PASS
+        else
+                print_FAIL
+        fi
+  else
+        print_FAIL
+  fi
+
+  pad " · Checking if the container mysql-1 was created"
+  container1=$(grep mysql-1 /tmp/my-containers | wc -l)
+  pass_if_equal "$container1" "1"
+
+  pad " · Checking if the mysql-2 container is running"
+  container2=$(sudo -u student podman ps -a --format "{{ .Names }}" | grep "mysql-2" | wc -l)
+  pass_if_NOT_equal "$container2" "0"
+
+  pad " · Checking tables for the 'Finished lab' row"
+  rows=$(mysql -sN -uuser1 -h 127.0.0.1 -pmypa55 -P13306 items -e "SELECT *  FROM Item" | grep "Finished lab" | wc -l)
+  pass_if_equal "$rows" "1"
+
+}
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-
-  pad " · Stopping the 'mysqldb-port' container" && podman_stop_container_rootless $mysqldb-port
-  pad " · Removing the 'mysqldb-port' container" && podman_rm_container_rootless mysqldb-port
-
-  pad " · Removing the 'registry.redhat.io/rhel8/mysql-80:1' image" && podman_rm_image_rootless registry.redhat.io/rhel8/mysql-80:1
-
-  pad " · Removing the /home/student/local/mysql directory"
+  pad " · Removing the /home/student/local/mysql folder"
   if remove_directory /home/student/local/mysql; then
     print_SUCCESS
   else
@@ -118,16 +132,49 @@ function lab_finish {
     if sudo semanage fcontext -d -t container_file_t '/home/student/local/mysql(/.*)?'; then
       print_SUCCESS
     else
-      print_line "Unable to remove fcontext for /home/student/local/mysql directory!"
       print_FAIL
+      print_line "Unable to remove fcontext for /home/student/local/mysql directory!"
     fi
   else
     echo "File context for /home/student/local/mysql not found - no need to remove."
     print_SUCCESS
   fi
 
+  for container in mysql-1 mysql-2; do
+    pad " · Stopping $container container"
+    podman_stop_container_rootless $container
+
+    pad " · Removing $container container"
+    podman_rm_container_rootless $container
+  done
+
+  pad " · Removing MySQL container image"
+  podman_rm_image_rootless registry.redhat.io/rhel8/mysql-80:1
+
+  pad " · Removing temporary file"
+  if remove_directory /tmp/my-containers; then
+    print_SUCCESS
+  else
+    print_FAIL
+  fi
+
+  pad " · Removing the project directory"
+  if remove_directory /home/student/DO180/labs/manage-review; then
+    print_SUCCESS
+  else
+    print_FAIL
+  fi
+  pad " · Removing the solution directory"
+  if remove_directory /home/student/DO180/solutions/manage-review; then
+    print_SUCCESS
+  else
+    print_FAIL
+  fi
+
 
 }
+
+
 
 ############### Don't EVER change anything below this line ###############
 
