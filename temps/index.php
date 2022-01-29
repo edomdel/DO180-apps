@@ -1,1826 +1,428 @@
 #
-# Copyright 2021 Red Hat, Inc.
+# Copyright 2010-2021 Red Hat, Inc.
 #
 # NAME
-#     labtool.do180.shlib - lab grading script do180 function library
+#     labtool.shlib - lab grading script function library
 #
 # SYNOPSIS
 #     Add the following line at the top of your script:
 #
-#        source /path/to/labtool.do180.shlib
-#
-#     *after* the source of the generic labtool.shlib
+#        source /path/to/labtool.shlib
 #
 # DESCRIPTION
+#
+#     Use the log function to silently send a message to syslog.
+#
+#	 log 'something happened'
+#
+#     Even better, use the debug function to send messages to the
+#     syslog. The difference is that debug messages are also sent to
+#     stdout if DEBUG=true is set in your script or in the environment.
+#
+#	debug 'something happened'
+#
+#     Use the warn function to send messages to syslog *and* print
+#     them to the screen. Execution will continue.
+#
+#	warn 'something happened'
+#
+#     Use the fatal function to send messages to syslog *and* print
+#     them to the screen. The script will exit immediately and return
+#     the exit status passed as the first parameter.
+#
+#	fatal # 'something happened'
+#
+#     You can override the default LOG_TAG with the name of your
+#     script. To override the default LOG_TAG (or any of the default
+#     below) just change the value in your script.
+#
+#	LOG_TAG="hammertime"
+#
+#     If a script must run as root, use the check_root function. If the
+#     script is not running as root, it will tell the user and exit.
+#
+#	check_root
+#
+#     Before performing any grading functions, all of the affected hosts
+#     should be running. The host_reachable function confirms that a host
+#     (passed as the argument) responds to ping and can be reached via
+#     SSH. This function panics when a required host is not reachable.
+#
+#	host_reachable servera
+#	host_reachable satellite
 #
 # CHANGELOG
-#   * Tue Mar 23 2021 Harpal Singh <harpasin@redhat.com>
-#   - Added new functions to stop, rm, rmi for rootless podman, added podman unshare for ownership change.
-#   * Wed Nov 11 2020 Michael Phillips <miphilli@redhat.com>
-#   - Updated the get_dependant and podman_rm_image function based on testing
-#   * Fri Sep 11 2020 Michael Phillips <miphilli@redhat.com>
-#   - Reverted the materials variable to use do180 instead of ${RHT_COURSE}
-#   * Mon Feb 24 Michael Phillips <miphilli@redhat.com>
-#   - Modified the materials variable to use ${RHT_COURSE}/${RHT_VMTREE%/*} so that the line does not need to be changed with course updates.
-#   - This change required sourcing /etc/rht.
-#   * Wed Feb 19 Michael Phillips <miphilli@redhat.com>
-#   - Changed the materials variable to point to a specific directory on content.example.com. This will allow labtool.do180.shlib to be reused with do285.
-#   * Fri Jun 18 Razique Mahroua <rmahroua@redhat.com>
-#   - Various changes (usage of pad/ print line)
-#   * Fri Mar 17 2017 Jim Rigsbee <jrigsbee@redhat.com>
-#   - Initial revision
-
-# Get RHT_* variable definitions
-[[ -f /etc/rht ]] && source /etc/rht
-
-RHT_OCP4_CONFIG=/usr/local/etc/ocp4.config
-
-source ${RHT_OCP4_CONFIG} &>/dev/null
-
-#common environment variables here
-curl_save='curl -s -S -o'
-curl='curl -s'
-wget='wget -O'
-user="student"
-do180_home="/home/${user}/DO180"
-labs="${do180_home}/labs"
-solutions="${do180_home}/solutions"
-materials="http://content.example.com:${RHT_CONTENT_PORT:-80}/courses/do180/${RHT_VMTREE%/*}/materials"
-contents="http://content.example.com:${RHT_CONTENT_PORT:-80}"
-cluster_url="${RHT_OCP4_MASTER_API}"
-
-timeout=45
-local_clone="/home/student/DO180-apps"
-source /usr/local/etc/ocp4.config
-
-
-
-default_oc_user=${RHT_OCP4_DEV_USER}
-default_oc_user_pass=${RHT_OCP4_DEV_PASSWORD}
-oc="run_as ${user} oc"
-COURSE="DO180"
-COURSE_APPS="${COURSE}-apps"
-git_repo="https://github.com/${RHT_OCP4_GITHUB_USER}/${COURSE_APPS}/"
-COURSE_HOME="/home/student/${COURSE}"
-local_clone="${COURSE_HOME}-apps"
-TIMEOUT=6
-
-
-default_oc_user=${RHT_OCP4_DEV_USER}
-default_oc_user_pass=${RHT_OCP4_DEV_PASSWORD}
-oc="run_as ${user} oc"
-git_repo="http://github.com/${RHT_OCP4_GITHUB_USER}/DO180-apps/"
-
-# NAME
-#     solve_lab
+#   * Thu Jun 22 2017 George Hacker <ghacker@redhat.com>
+#   - added spinner function (thanks for the idea, Razique)
+#   * Thu Jun 15 2017 George Hacker <ghacker@redhat.com>
+#   - make /var/tmp/labs/ log directory permission 777
+#   * Wed Oct 19 2016 George Hacker <ghacker@redhat.com>
+#   - incorporated Chen's IO handling, logs are in /var/tmp/labs/
+#   * Thu Jan 28 2016 George Hacker <ghacker@redhat.com>
+#   - adjusted print_* functions so they always return 0
+#   * Fri Jan 22 2016 George Hacker <ghacker@redhat.com>
+#   - added general purpose print_usage function
+#   - added Wander's pad function
+#   * Mon Nov 23 2015 George Hacker <ghacker@redhat.com>
+#   - use sudo -E option to ensure "lab" exports are propagated
+#   * Fri Nov 13 2015 George Hacker <ghacker@redhat.com>
+#   - provide grading_main_program function for problem scripts
+#   - define useful default values for ${ssh} and ${scp}
+#   - implemented PRINT_* function counters
+#   - deprecated get_X and check_host functions
+#   * Thu Oct 22 2015 George Hacker <ghacker@redhat.com>
+#   - added host_reachable function
+#   * Mon Feb 23 2015 Robert Locke <rlocke@redhat.com>
+#   - clean get_X to simplify and tie in to /etc/rht
+#   * Thu Oct  2 2014 George Hacker <ghacker@redhat.com>
+#   - added warn and fatal functions
+#   - fixed stationNum and MYHOST caculation (server33-a -> server-a)
+#   - added MYHOSTX variable (server33-a -> serverX-a)
+#   * Thu Sep  2 2010 Joshua M. Hoffman
+#   - original code
 #
-# USAGE
-#     solve_lab
-#
-# DESCRIPTION
-#     Noop function that tells the student to import the solution project.
-#
-# REQUIREMENTS
-#     $this must be set to lab folder name.
-#
-# PARAMETERS
-#     None
-#
-# RETURNS
-#     Nothing
-#
-# RUNS:
-#
-function solve_lab()
-{
-  print_line "Import the solution at ${solutions}/${this}."
+# <blink>
+   ###################### IMPORTANT ########################
+   ###### DO NOT MAKE ANY CHANGES TO THIS FILE. IT IS ######
+   ###### MAINTAINED BY GHACKER@REDHAT.COM.           ######
+   #########################################################
+# </blink>
 
-}
+# defaults, but use exported values if they are set
+: ${LOG_FACILITY:=local0}
+: ${LOG_PRIORITY:=info}
+: ${LOG_TAG:="${0##*/}"}
+ERROR_MESSAGE="Error running script. Contact your instructor if you continue
+to see this message."
+PACKAGES=( bash )
+ssh=${ssh-ssh -o StrictHostKeyChecking=no}
+scp=${scp-scp -o StrictHostKeyChecking=no -q}
 
-# NAME
-#     reset_lab
-#
-# USAGE
-#     reset_lab
-#
-# DESCRIPTION
-#     remove the lab and solution folders for a given lab.
-#
-# REQUIREMENTS
-#     $this must be set to lab folder name.
-#
-# PARAMETERS
-#     None
-# RETURNS
-#     Nothing
-#
-# RUNS:
-#
-function reset_lab()
-{
+# initialize PRINT_* counters to zero
+pass_count=0 ; fail_count=0 ; success_count=0
 
-  rm -fr ${labs}/${this}
-  rm -fr ${solutions}/${this}
+# paths
+logger='/bin/logger'
+rpm='/bin/rpm'
 
-  print_line
-  print_line " ·  Removed files for ${this} - ${title}."
-  print_line " ·  Please use start if you wish to do the exercise again."
-}
+SUDO='/usr/bin/sudo'
 
-# NAME
-#     grab_lab_files
-#
-# USAGE
-#     grab_lab_files
-#
-# REQUIREMENTS
-#     $this must be set to lab folder name.
-#     $title must be set to the title of the lab and have a prefix "GE: ", "Demo: " or "Lab: ".
-#
-# DESCRIPTION
-#     Download the lab files for a given lab.
-#     Do not download the files if the lab directory is present,
-#       tell them to use the reset verb to overwrite their work.
-#
-# PARAMETERS
-#     $1 - true/false - pull OpenShift scripts into the lab directory
-#          defaults to false
-# RETURNS
-#     Nothing
-#
-function grab_lab_files()
-{
-  if [ ! -d "${do180_home}" ]; then
-    mkdir "${do180_home}" &>/dev/null
-    chown student:student "${do180_home}" &>/dev/null
-  fi
+# Export LANG so we get consistent results
+# For instance, fr_FR uses comma (,) as the decimal separator.
+export LANG=en_US.UTF-8
 
-  if [ -d "${labs}/${this}" ]; then
-    print_line "Exercise is already setup."
-    return
-  fi
+# Read in RHT parameters if available
+[[ -r /etc/rht ]] && source /etc/rht
 
-  rc=0
 
-  if [ ! -d "${labs}" ]; then
-    pad ' · Setting up labs folder'
-    mkdir -p "${labs}"
-    if [ $? -eq 0 ]; then
-      print_SUCCESS
-      chown -R student:student "${labs}"
-    else
-      print_FAIL
-      rc=1
-    fi
-    #print_line
-  fi
-
-  if [ ! -d "${solutions}" ]; then
-    pad ' · Setting up solutions folder'
-    mkdir -p "${solutions}"
-    if [ $? -eq 0 ]; then
-      print_SUCCESS
-      chown -R student:student "${solutions}"
-    else
-      print_FAIL
-      rc=1
-    fi
-    #print_line
-  fi
-
-  pad ' · Downloading starter project'
-  mkdir -p "${labs}/${this}"
-  ${curl_save} ${labs}/${this}.tgz ${materials}/labs/${this}.tgz
-  if [ -f "${labs}/${this}.tgz" ]; then
-    pushd ${labs} &>/dev/null
-    if tar xzf ${this}.tgz 2>&1 >/dev/null; then
-      rm -f ${this}.tgz
-      chown -R student:student "${labs}/${this}"
-      print_SUCCESS
-    else
-      print_FAIL
-      rc=1
-    fi
-    popd &>/dev/null
-  else
-    print_FAIL
-    rc=1
-  fi
-
-  pad ' · Downloading solution project'
-  mkdir -p "${solutions}/${this}"
-  ${curl_save} ${solutions}/${this}.tgz ${materials}/solutions/${this}.tgz
-  if [ -f "${solutions}/${this}.tgz" ]; then
-    pushd ${solutions} &>/dev/null
-    if tar xzf ${this}.tgz 2>&1 >/dev/null; then
-      rm -f ${this}.tgz
-      chown -R student:student "${solutions}/${this}"
-      print_SUCCESS
-    else
-      print_FAIL
-      rc=1
-    fi
-    popd &>/dev/null
-  else
-    print_FAIL
-    rc=1
-  fi
-
-  if [ $rc -eq 0 ]; then
-    cd ${labs}/${this}
-    #if [ "$1" == "true" ]; then
-    #  grab_ocp_files
-    #fi
-    print_line
-    print_line "Setup successful. Please proceed with the exercise."
-    print_line
-  else
-    print_line "Setup failed. Please see previous messages."
+function print_header {
+  if [[ $# -gt 0 ]]
+  then
+    echo -e "\n${@}\n"
+    echo -e "\n${@}\n" >&2
+    echo -e "\n${@}\n" >&3
   fi
 }
 
-# NAME
-#     grab_ocp_files
-#
-# USAGE
-#     grab_ocp_files
-#
-# DESCRIPTION
-#     Grab the specific ocp scripts and place in labs/solutions folders
-#
-# REQUIREMENTS
-#     $this must be set to lab folder name
-#
-# PARAMETERS
-#     None
-#
-# RETURNS
-#     Nothing
 
-#function grab_ocp_files() {
-#
-#  ${curl_save} ${labs}/${this}/setpolicy.sh ${materials}/setpolicy.sh
-#  ${curl_save} ${solutions}/${this}/setpolicy.sh ${materials}/setpolicy.sh
-#  chmod +x ${labs}/${this}/setpolicy.sh
-#  chmod +x ${solutions}/${this}/setpolicy.sh
+function print_line {
+  echo "${@}"
+  echo "${@}" >&2
+  echo "${@}" >&3
+}
+
+
+function spinner {
+  local -r pid="${1}" delay="${2-3}"
+  local -r spinchars=( '|' '/' '-' '\' )
+  local s=0
+  printf "[${spinchars[${s}]}]" >&3
+  while kill -0 ${pid} &> /dev/null; do
+    sleep ${delay}
+    printf "\b\b${spinchars[$((++s%4))]}]" >&3
+  done
+  printf '\b\b\b' >&3
+}
+
+
+# print to logfile *only*
+function log {
+  if [[ $# -gt 0 ]]
+  then
+    ${logger} -p ${LOG_FACILITY}.${LOG_PRIORITY} -t ${LOG_TAG} -- "${@}"
+  else
+    while read data
+    do
+      ${logger} -p ${LOG_FACILITY}.${LOG_PRIORITY} -t ${LOG_TAG} -- "${data}"
+    done
+  fi
+}
+
+
+# print/log and immediately exit
+function fatal {
+  exit_status=${1:=127}
+  shift
+  print_line "${@}"
+  log "${@}"
+  exit ${exit_status}
+}
+
+
+# print/log and continue execution
+function warn {
+  print_line "${@}"
+  log "${@}"
+}
+
+
+# print to screen and log (only active when DEBUG is 'true')
+function debug {
+  if [[ "$DEBUG" = 'true' ]]
+  then
+    if [[ $# -gt 0 ]]
+    then
+      echo "DEBUG: ${@}"
+      log "DEBUG: ${@}"
+    else
+      while read data
+      do
+	echo "DEBUG: ${data}"
+        log "DEBUG: ${data}"
+      done
+    fi
+  fi
+}
+
+
+# exit if not root
+function check_root {
+  if [[ "${EUID}" -gt 0 ]]
+  then
+    fatal 1 'This script must be run as root!'
+  fi
+}
+
+
+# exit if needed packages missing
+function check_packages {
+  for package in ${PACKAGES[@]}
+  do
+    if ${rpm} -q ${package} &> /dev/null
+    then
+      continue
+    else
+      fatal 2 "Please install ${package} and try again."
+    fi
+  done
+}
+
+
+# exit when user answers 'N'
+function confirm {
+  read -p "Is this ok [y/N]: " userInput
+  case "${userInput:0:1}" in
+    "y" | "Y")
+      return 0
+      ;;
+    *)
+      fatal 3 'Script aborted.'
+      ;;
+  esac
+}
+
+
+function check_tcp_port {
+  if [[ ${#1} -gt 0 && ${#2} -gt 0 ]]
+  then
+    # Sending it to the log always returns 0
+    ($(echo "brain" >/dev/tcp/$1/$2)) && return 0
+  fi
+  return 1
+}
+
+
+function wait_tcp_port {
+  if [[ ${#1} -gt 0 && ${#2} -gt 0 ]]; then
+    # Make sure it is pingable before we attempt the port check
+    echo
+    echo -n "Pinging $1"
+    until `ping -c1 -w1 $1 &> /dev/null`;do
+      echo -n "."
+      sleep 3
+    done
+    iterations=0
+    echo
+    echo 'You may see a few "Connection refused" errors before it connects...'
+    sleep 10
+    until [[ "$remote_port" == "smart" || $iterations -eq 30 ]]; do
+      ($(echo "brain" >/dev/tcp/$1/$2) ) && remote_port="smart" || remote_port="dumb"
+      sleep 3
+      iterations=$(expr $iterations + 1)
+    done
+    [[ $remote_port == "smart" ]] && return 0
+  fi
+  return 1
+}
+
+
+function pad {
+  local text="$1"
+  local dots='...............................................................'
+
+  local spacers='!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+  local spacerpad=$(( (${#spacers} - ${#text} - 2) / 2 ))
+
+  printf '\n\n%s\n' "${spacers}"
+  printf '!%s%s !\n' "${text}" "${dots:${#text}}"
+  printf '%s\n' "${spacers}"
+
+  printf '\n\n%s\n' "${spacers}" >&2
+  printf '!%s%s !\n' "${text}" "${dots:${#text}}" >&2
+  printf '%s\n' "${spacers}" >&2
+
+  printf '%s%s  ' "${text}" "${dots:${#text}}" >&3
+}
+
+
+function print_FAIL {
+  [[ $# -gt 0 ]] && echo -n "$@ "
+  __print_status FAIL 31
+  let fail_count++
+  return 0
+}
+
+
+function print_PASS {
+  [[ $# -gt 0 ]] && echo -n "$@ "
+  __print_status PASS 32
+  let pass_count++
+  return 0
+}
+
+
+function print_SUCCESS {
+  [[ $# -gt 0 ]] && echo -n "$@ "
+  __print_status SUCCESS 36
+  let success_count++
+  return 0
+}
+
+
+#function print_OK {
+#  [[ $# -gt 0 ]] && echo -n "$@ "
+#  if [[ "${grade_verb}" == 'grade' ]]
+#  then
+#    __print_status PASS 32
+#    let pass_count++
+#  else
+#    __print_status SUCCESS 36
+#    let success_count++
+#  fi
+#  return 0
 #}
 
-# NAME
-#     grab_kubeadmin
-#
-# USAGE
-#     grab_kubeadmin
-#
-# REQUIREMENTS
-#     None
-#
-# DESCRIPTION
-#     Download the kubeadmin credentials file.
-#
-# PARAMETERS
-#     None
-#
-# RETURNS
-#     Nothing
-#
-function grab_kubeadmin()
-{
-  debug "The grab_kubeadmin() function has been deprecated"
-  exit 1
-  #pad " · Ensure the integrity of ${ocp_credentials}"
-  #rm -Rf ${ocp_credentials}
-  #ln -s /home/student/auth/kubeadmin-password ${ocp_credentials}
-  #success_if_equal $? 0
 
+function print_usage {
+  cat << EOF
+This script controls the setup and grading of this lab.
+Usage: ${lab_demo_mode} ${problem_name} COMMAND
+       ${lab_demo_mode} ${problem_name} -h|--help
+
+COMMAND is one of: ${valid_commands[@]}
+
+EOF
 }
 
 
-###NEW SHARED CLUSTER FUNCTIONS
-function ocp4_pad {
-  local msg="$( echo $@ | sed -e 's/^[[:space:]]*//' | sed -e 's/[[:space:]]*$//' )"
-  local max=60
-  local prefix=' · '
-  local len="${#msg}"
-  while [ "${len}" -ge "${max}" ]; do
-    print_line "${prefix}${msg:0:${max}}"
-    local msg="$( echo ${msg:${max}:${len}} | sed -e 's/^[[:space:]]*//' | sed -e 's/[[:space:]]*$//' )"
-    local len="${#msg}"
-    local prefix='   '
-  done
-  pad "${prefix}${msg}"
-}
+function __log_on {
+  LOG_DIR='/var/tmp/labs'
+  LOG="${LOG_DIR}/${problem_name}"
 
-
-function ocp4_login_as_developer {
-
-  # IMPORTANT: Keep this code in sync with the lab-configure script
-  ocp4_pad 'Log in on OpenShift'
-
-  if ! [ -r ${RHT_OCP4_CONFIG} ]; then
-    print_FAIL
-    print_line
-    fatal 9 'You need to perform GE "Configuring the Classroom Environment" before starting any exercise.'
-  fi
-
-  if ! curl --connect-timeout "45" -sk "${RHT_OCP4_MASTER_API}/apis/config.openshift.io/v1" &>/dev/null
+  if [[ ! -d ${LOG_DIR} ]]
   then
-    print_FAIL
-    print_line
-    fatal 9 "Cannot connect to the OpenShift Master API. Please check your network connectivity."
-  fi
-
-  if ! ${oc} login -u "${RHT_OCP4_DEV_USER}" -p "${RHT_OCP4_DEV_PASSWORD}" --insecure-skip-tls-verify "${RHT_OCP4_MASTER_API}" &>/dev/null
-  then
-    print_FAIL
-    print_line
-    fatal 9 "Cannot login to OpenShift using your URL and developer credentials."
-  fi
-
-  print_SUCCESS
-}
-
-function ocp4_check_pod_ready_and_running {
-  local project="$1"
-  local selector="$2"
-
-  #XXX original code did not work with Kubernetes deployments; only with OpenShift dcs
-  #XXX gets the first pod from the list
-  local pod=$(${oc} get pod -l "${selector}" -n "${project}" -o name --field-selector=status.phase=Running | sed 1q)
-  #echo "*** selector: ${selector}"
-  #echo "*** pod: ${pod}"
-  local pod_ready=$(${oc} get "${pod}" -n "${project}" -o jsonpath="{.status.conditions[?(@.type=='Ready')].status}")
-  #echo "*** pod ready: ${pod_ready}"
-  #XXX assumes the pod has a single container
-  local container_ready=$(${oc} get "${pod}" -n "${project}" -o jsonpath="{.status.containerStatuses[0].ready}")
-  #echo "*** container ready: ${container_ready}"
-  test "${pod_ready}" = "True" -a "${container_ready}" = "true"
-}
-
-##########################################################################
-## Git repo convenience functions
-## same assumptions as the Techology functions group
-## Note: these functions may print pad messages
-##########################################################################
-
-
-function ocp4_exit_missing_apps_repo {
-
-  print_line
-  print_line 'You do not seem to have a local clone of the applications repository.'
-  print_line 'Perform the first guided exercise: "Configuring Your Classroom Environment" before starting this exercise.'
-  ocp4_exit_on_failure
-}
-
-
-function ocp4_verify_local_clone_exist {
-
-  print_line ' Checking local clone of the applications repository:'
-  ocp4_pad "Folder '${local_clone}' is a git repo"
-  if [ -d "${local_clone}/.git" ]
-  then
-    print_SUCCESS
-  else
-    print_FAIL
-    ocp4_exit_missing_apps_repo
-  fi
-  ocp4_pad "Git repo '${local_clone}' has no pending changes"
-  cd "${local_clone}"
-  local git_status=$(git status -s)
-  if [ "${git_status}" = "" ]
-  then
-    print_SUCCESS
-  else
-    print_FAIL
-    ocp4_exit_missing_apps_repo
-  fi
-}
-
-
-function ocp4_verify_local_clone_clean {
-
-  if [ -d "${local_clone}" ]
-  then
-    ocp4_pad "Git repo '${local_clone}' has no pending changes"
-    cd "${local_clone}"
-    local git_status=$(git status -s)
-    if [ "${git_status}" = "" ]
+    if ! mkdir -p -m 0777 ${LOG_DIR}
     then
-      print_SUCCESS
-    else
-      print_FAIL
-      print_line
-      print_line 'You need to either stash or commit your local changes before moving to the next exercise.'
-      print_line 'See the Appendix "Managing Git Branches" if you need help to perform these actions'
+      echo "Failed to create ${LOG_DIR}"
+      exit 1
     fi
   fi
-}
 
-### END NEW SHARED CLUSTER FUNCTIONS
+  exec 3>&1 1>>"${LOG}" 2>>"${LOG}.err"
 
-
-# NAME
-#     login_openshift
-#
-# USAGE
-#     login_openshift
-#
-# DESCRIPTION
-#     function that logs in to OpenShift.
-#
-# REQUIREMENTS
-#     None
-# PARAMETERS
-#     project-name : The project name created on OpenShift
-#
-# RETURNS
-#     0 - The user was logged out successfully
-#     1 - The user was NOT logged out successfully
-# RUNS:
-#
-function login_openshift() {
-  debug "The login_openshift() function has been deprecated"
-  exit 1
-  # ${oc} login -u ${default_oc_user} -p ${default_oc_user_pass} --insecure-skip-tls-verify=true ${cluster_url}
-  # if [ $? -eq 0 ]; then
-  #   debug "The user is logged in successfully"
-  #   chown -R student:student /home/student/.kube
-  #   return 0
-  # else
-  #   debug "The user is NOT logged in successfully"
-  #   return 1
-  # fi
-}
-
-# NAME
-#     logout_openshift
-#
-# USAGE
-#     logout_openshift
-#
-# DESCRIPTION
-#     function that logs out of OpenShift.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     project-name : The project name created on OpenShift
-#
-# RETURNS
-#     0 - The user was logged out successfully
-#     1 - The user was NOT logged out successfully
-# RUNS:
-#
-function logout_openshift() {
-  debug "The logout_openshift() function has been deprecated"
-  exit 1
-
-  # ${oc} logout -u ${default_oc_user} -p ${default_oc_user_pass} --insecure-skip-tls-verify=true ${cluster_api_url}
-  # if [ $? -eq 0 ]; then
-  #   debug "The user is logged out successfully"
-  #   chown -R student:student /home/student/.kube
-  #   return 0
-  # else
-  #   debug "The user is NOT logged out successfully"
-  #   return 1
-  # fi
-}
-
-# NAME
-#     run_as
-#
-# USAGE
-#     run_as
-#
-# REQUIREMENTS
-#     $user must be set
-#
-# DESCRIPTION
-#     Run command as the given user
-#
-# PARAMETERS
-#     $1 - User to run as
-#     $2 - Command to run
-#
-# RETURNS
-#     Result of the execution
-#
-function run_as() {
-  sudo -s -u $@
-}
-
-# NAME
-#     ocp_is_running
-#
-# USAGE
-#     ocp_is_running
-#
-# REQUIREMENTS
-#     $this must be set to lab folder name.
-#
-# DESCRIPTION
-#     Make sure the OCP cluster is running with oc cluster up
-#     This uses the local ocp-up.sh script
-#
-# PARAMETERS
-#     None
-#
-# RETURNS
-#     Nothing
-#
-function ocp_is_running() {
-
-  pad " · Ensuring that the OpenShift cluster is accessible"
-
-  source /usr/local/etc/ocp4.config
-
-  login_openshift
-
-  success_if_equal $? 0
-}
-
-# NAME
-#     create_project
-#
-# USAGE
-#     create_project <project-name>
-#
-# DESCRIPTION
-#     function that creates a project in OpenShift for the student's user.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     project-name : The project name
-# RETURNS
-#     0 - Project was created
-#     1 - Project was not created
-# RUNS:
-#
-function create_project() {
-  local project_name=$1
-  ${oc} new-project ${project_name}
-  if [ $? -eq 0 ]; then
-	  debug "The project ${project_name} was created"
-    return 0
-  else
-    debug "The project ${project_name} was not created"
-    return 1
-  fi
-}
-
-# NAME
-#     delete_project
-#
-# USAGE
-#     delete_project <project-name>
-#
-# DESCRIPTION
-#     function that deletes a project in OpenShift for the student's user.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     project-name : The project name created on OpenShift
-# RETURNS
-#     0 - Project was deleted
-#     1 - Project was not deleted
-# RUNS:
-#
-function delete_project() {
-  local project_name=$1
-
-  ${oc} project ${project_name}
-  if [ $? -ne 0 ]; then
-    debug "The project does not exist; no need to delete."
-    return 0
-  fi
-
-  ${oc} delete projects ${project_name}
-
-  if [ $? -eq 0 ]; then
-	  debug "The project ${project_name} was deleted"
-    return 0
-  else
-    debug "The project ${project_name} was not deleted"
-    return 1
-  fi
-}
-
-# NAME
-#     delete_pv
-#
-# USAGE
-#     delete_pv <pv-name>
-#
-# DESCRIPTION
-#     function that deletes a persistent volume in OpenShift for the student's user.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     pv-name : The persistent volume name created on OpenShift
-# RETURNS
-#     0 - PV was deleted
-#     1 - PV was not deleted
-# RUNS:
-#
-function delete_pv() {
-  local pv_name=$1
-
-  ${oc} get pv ${pv_name}
-  if [ $? -ne 0 ]; then
-    debug "The PV does not exist; no need to delete."
-    return 0
-  fi
-
-  ${oc} delete pv ${pv_name}
-  if [ $? -eq 0 ]; then
-	debug "The PV ${project_name} was deleted"
-    return 0
-  else
-    debug "The PV ${project_name} was not deleted"
-    return 1
-  fi
+  echo -e "\n\n#################### $(date) ####################\n"
+  echo -e "\n\n#################### $(date) ####################\n" >&2
 }
 
 
-# NAME
-#     find_route_fqdn
-#
-# USAGE
-#     find_route_fqdn <route_name>
-#
-# DESCRIPTION
-#     Prints the hostname associated to a route
-#
-# REQUIREMENTS
-#     The route should exist
-#
-# PARAMETERS
-#     $1 - The name of the route
-#
-# RETURNS
-#     The FQDN of the route, if available.
-#
-# RUNS:
-#
-function find_route_fqdn() {
-  local fqdn=$(${oc} get route $1 --template={{.spec.host}})
-  echo $fqdn;
-}
+function __print_status {
+  local text="${1}" color="${2}"
+  local spacers='!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+  local spacerpad
 
-# NAME
-#     find_router_port
-#
-# USAGE
-#     find_router_port <route_name>
-#
-# DESCRIPTION
-#     Prints the port associated to a route
-#
-# REQUIREMENTS
-#     The route should exist
-#
-# PARAMETERS
-#     $1 - The name of the route
-#
-# RETURNS
-#     The port associated of the route
-#
-# RUNS:
-#
-function find_router_port() {
-  local routeTls=$(${oc} get route $1 --template={{.spec.tls}})
-  if [[ $routeTls == "<no value>" ]]; then
-    echo "80"
-  else
-    echo "443"
-  fi
-}
-
-
-# NAME
-#     find_route_url
-#
-# USAGE
-#     find_route_url <route_name>
-#
-# DESCRIPTION
-#     Prints the the url associated to a route
-#
-# REQUIREMENTS
-#     The route should exist
-#
-# PARAMETERS
-#     $1 - The name of the route
-#
-# RETURNS
-#     The URL associated of the route
-#
-# RUNS:
-#
-function find_route_url() {
-  local fqdn=$(find_route_fqdn $1)
-  local port=$(find_router_port $1)
-  if [[ $port == "80" ]]; then
-    echo "http://$fqdn:$port"
-  else
-    echo "https://$fqdn:$port"
-  fi
-}
-
-
-# NAME
-#     get_git_repo_first_commit_hash
-#
-# USAGE
-#     revert_git_repo <repo_url>
-#
-# DESCRIPTION
-#     function that gets a remote git repository first commit has.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     repo_url :           For example, http://services.lab.example.com/php-helloworld
-#
-# RETURNS
-#     0 - If remote repository is now at the correct commit.
-#     1 - If function failed to return remote repository to the correct commit.
-# RUNS:
-function get_git_repo_first_commit_hash() {
-  local repo=$1
-  local local_repo_name=temp_git_repo
-
-  let err_ctr=0
-
-  cd /tmp
-  rm -Rf /tmp/$local_repo_name
-  if git clone $repo $local_repo_name > /dev/null ; then
-    cd /tmp/$local_repo_name
-    result=$(git log --oneline | tail -n1 | awk '{print $1}')
-
-    if [ $? == "0" ]; then
-      echo $result
-      #debug "Reverted commit successfully pushed."
-    else
-      #debug "Unable to push the reverted change."
-      let err_ctr++
-    fi
-  else
-    #debug "Unable to clone repository: $repo"
-    let err_ctr++
-  fi
-
-
-
-}
-
-
-# NAME
-#     revert_git_repo
-#
-# USAGE
-#     revert_git_repo <repo_url> <branch> <commit_to_revert_to>
-#
-# DESCRIPTION
-#     function that sets a remote git repository back to a previous commit.
-#
-# REQUIREMENTS
-#     None
-#
-# PARAMETERS
-#     repo_url :           For example, http://services.lab.example.com/php-helloworld
-#     branch:              For example, master
-#     commit_to_revert_to: 67a123ef
-#
-# RETURNS
-#     0 - If remote repository is now at the correct commit.
-#     1 - If function failed to return remote repository to the correct commit.
-# RUNS:
-#
-function revert_git_repo() {
-  local repo=$1
-  local branch=$2
-  local commit=$3
-  local local_repo_name=temp_git_repo
-
-  let err_ctr=0
-
-  cd /tmp
-  rm -Rf /tmp/$local_repo_name
-  if git clone $repo $local_repo_name; then
-    cd /tmp/$local_repo_name
-    git checkout $branch
-    git reset --hard $commit
-
-    if git push -f origin $branch; then
-      debug "Reverted commit successfully pushed."
-    else
-      debug "Unable to push the reverted change."
-      let err_ctr++
-    fi
-  else
-    let err_ctr++
-    print_line
-  fi
-
-  #Cleanup
-  cd -
-  rm -Rf /tmp/$local_repo_name
-
-  #Return right exit code.
-  if [ $err_ctr -eq 0 ]; then
-    return 0
-  else
-    return 1
-  fi
-
-}
-
-
-
-# NAME
-#   podman_rm_image
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses podman to remove an image from the local
-#   cache.  User namespace containers are not removed; only containers
-#   accessible by root/sudo.
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The image name. (Ex: httpd:2.4)
-#
-#
-function podman_rm_image() {
-  local images="$1"
-  local action_status="failed"
-
-  if echo "${images}" | grep -q "/"
+  if [[ $# -eq 2 ]]
   then
-    # $images contains an image name
-    local image_name=$1
-
-    res=$(sudo podman images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep "$image_name")
-    if [ -z "$res" ]; then
-      echo "$image_name does not exist locally; no need to for removal."
-      action_status="success"
-    else
-      if sudo podman rmi -f $(echo $res | awk '{print $2}') ; then
-        action_status="success"
-      fi
-    fi
+    echo -e "\\033[1;${color}m${text}\\033[0;39m" >&3
+    spacerpad=$(( (${#spacers} - ${#text} - 2) / 2 ))
+    printf '%s %s %s\n' "${spacers:0:$spacerpad}"  "${text}" "${spacers:$((${#spacer} - $spacerpad))}"
+    printf '%s %s %s\n' "${spacers:0:$spacerpad}"  "${text}" "${spacers:$((${#spacer} - $spacerpad))}" >&2
   else
-    # $images is a string of one or more image IDs
-    if sudo podman rmi -f ${images}; then
-      action_status="success"
-    fi
-  fi
-
-  if [ "${action_status}" == "success" ]
-  then
-    print_SUCCESS
-  else
-    print_FAIL
+    echo 'FIXME ERROR print_status wrong number of arguments'
   fi
 }
 
 
-# NAME
-#   podman_rm_image_rootless
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses rootless podman to remove an image from the local
-#   cache.  User namespace containers are removed.
-#   
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The image name. (Ex: httpd:2.4)
-#
-#
-function podman_rm_image_rootless() {
-  local images="$1"
-  local action_status="failed"
-
-  if echo "${images}" | grep -q "/"
-  then
-    # $images contains an image name
-    local image_name=$1
-
-    res=$(sudo -u student podman images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep "$image_name")
-    if [ -z "$res" ]; then
-      echo "$image_name does not exist locally; no need to for removal."
-      action_status="success"
-    else
-      if sudo -u student podman rmi -f $(echo $res | awk '{print $2}') ; then
-        action_status="success"
-      fi
-    fi
-  else
-    # $images is a string of one or more image IDs
-    if sudo -u student podman rmi -f ${images}; then
-      action_status="success"
-    fi
-  fi
-
-  if [ "${action_status}" == "success" ]
-  then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-}
-
-
-# NAME
-#   podman_rm_container
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses podman to forcefully remove a locally running
-#   container.  User namespace containers are not removed; only containers
-#   accessible by root/sudo.
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The container name.
-#
-#
-function podman_rm_container() {
-  local container_name="$1"
-
-  cid=$(podman_get_cid_by_name $container_name)
-  if [ -z "$cid" ]; then
-    echo "A container by the named $container_name was not found. No need for removal."
-    print_SUCCESS
-  else
-    if sudo podman rm -f $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-# NAME
-#   podman_rm_container_rootless
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses rootless podman to forcefully remove a locally running
-#   container.  User namespace containers are removed.
-#   
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The container name.
-#
-#
-function podman_rm_container_rootless() {
-  local container_name="$1"
-
-  cid=$(podman_get_cid_by_name $container_name)
-  if [ -z "$cid" ]; then
-    echo "A container by the named $container_name was not found. No need for removal."
-    print_SUCCESS
-  else
-    if sudo -u student podman rm -f $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-# NAME
-#   podman_stop_container
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses podman to forcefully remove a locally running
-#   container.  User namespace containers are not removed; only containers
-#   accessible by root/sudo.
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The container name.
-#
-#
-function podman_stop_container() {
-  local container_name="$1"
-
-  cid=$(podman_get_cid_by_name $container_name)
-  if [ -z "$cid" ]; then
-    echo "A container by the named $container_name was not found. No need to stop."
-    print_SUCCESS
-  else
-    if sudo podman stop $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-
-# NAME
-#   podman_stop_container_rootless
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses rootless podman to forcefully remove a locally running
-#   container.  User namespace containers are removed
-#   
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The container name.
-#
-#
-function podman_stop_container_rootless() {
-  local container_name="$1"
-
-  cid=$(podman_get_cid_by_name $container_name)
-  if [ -z "$cid" ]; then
-    echo "A container by the named $container_name was not found. No need to stop."
-    print_SUCCESS
-  else
-    if sudo -u student podman stop $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-# NAME
-#   podman_pod_stop_rootless
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses rootless podman to stop a locally running
-#   pod. User namespace pods are removed
-#   
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The pod name.
-#
-#
-function podman_pod_stop_rootless() {
-  local pod_name="$1"
-
-  cid=$(podman_pod_get_cid_by_name $pod_name)
-  if [ -z "$cid" ]; then
-    echo "A pod by the named $pod_name was not found. No need to stop."
-    print_SUCCESS
-  else
-    if sudo -u student podman pod stop $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-# NAME
-#   podman_pod_rm_rootless
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#   This function uses rootless podman to remove a locally running
-#   pod. User namespace pods are removed
-#   
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#   $1 - The pod name.
-#
-#
-function podman_pod_rm_rootless() {
-   local pod_name="$1"
-
-  cid=$(podman_pod_get_cid_by_name $pod_name)
-  if [ -z "$cid" ]; then
-    echo "A pod by the named $pod_name was not found. No need for removal."
-    print_SUCCESS
-  else
-    if sudo -u student podman pod rm -f $cid ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  fi
-
-}
-
-# NAME
-#   check_podman_registry_config
-#
-# USAGE
-#
-#
-# DESCRIPTION
-#
-#
-# REQUIREMENTS
-#
-#
-# PARAMETERS
-#
-#
-#
-function check_podman_registry_config() {
-
-  #Modify the "registries" entry that falls inbetween the
-  # registries.search and registry.insecure headings.
-  pad ' · Checking podman configuration'
-  if sed -i '/registries.search/,/registries.insecure/ s/^registries .*/registries = \["registry.access.redhat.com", "quay.io"\]/' /etc/containers/registries.conf
-  then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-
-}
-
-
-# NAME
-#     pass_if_equal
-#
-# USAGE
-#     pass_if_equal param1 param2
-#
-# DESCRIPTION
-#	  check if two arguments are equal.
-#
-# PARAMETERS
-#
-# PARAMETER: param1
-# PARAMETER: param2
-#
-# RETURNS
-# no return
-#
-# RUNS:
-# print_FAIL if they are different
-# print_PASS if the are equal
-
-function pass_if_equal
-{
-  if [ "$1" = "$2" ]; then
-    print_PASS
-  else
-    print_FAIL
-  fi
-}
-
-function success_if_equal
-{
-  if [ "$1" = "$2" ]; then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-}
-
-# NAME
-#     pass_if_NOT_equal
-#
-# USAGE
-#     pass_if_NOT_equal param1 param2
-#
-# DESCRIPTION
-#	  check if two arguments are different.
-#
-# PARAMETERS
-#
-# PARAMETER: param1
-# PARAMETER: param2
-#
-# RETURNS
-# no return
-#
-# RUNS:
-# print_FAIL if they are equal
-# print_PASS if the are different
-
-
-function pass_if_NOT_equal
-{
-  if [ "$1" = "$2" ]; then
-    print_FAIL
-  else
-    print_PASS
-  fi
-}
-
-function success_if_NOT_equal
-{
-  if [ "$1" = "$2" ]; then
-    print_FAIL
-  else
-    print_SUCCESS
-  fi
-}
-
-
-
-#XXX change to use the pad function
-function check_docker_is_running {
-  docker_service=$(systemctl is-active docker.service)
-  pad " · Check if docker is running"
-  success_if_equal "$docker_service" "active"
-}
-
-
-#Check that podman is installed.
-
-
-#Get's a podman container ID by container name.
-function podman_get_cid_by_name() {
-  result=$(sudo -u student podman ps -a -q --filter name="$1")
-  echo $result
-}
-
-#Get's a podman pod ID by pod name.
-function podman_pod_get_cid_by_name() {
-  result=$(sudo -u student podman pod ps -q --filter name="$1")
-  echo $result
-}
-
-
-function check_pass
-{
-  local fail_count=$1
-  if [ $fail_count -eq 0 ]
-  then
-    pad "All checks passed: lab grade status is"
-    print_PASS
-  else
-    pad "At least one check failed: lab grade status is "
-    print_FAIL
-  fi
-}
-
-function remove_directory
-{
-  local dir_name=$1
-  rm -rf ${dir_name}
-  if [ -d "${dir_name}" ]
-  then
-    return 1
-  else
-    return 0
-  fi
-}
-
-function remove_directory_remote
-{
-  local server=$1
-  local dir_name=$2
-  ssh root@${server} rm -rf ${dir_name}
-  if does_directory_exist_remote ${server} ${dir_name}; then
-    return 1
-  else
-    return 0
-  fi
-}
-
-function does_directory_exist_remote
-{
-  local server=$1
-  local dir_name=$2
-  ssh root@${server} ls -la ${dir_name} &>/dev/null
-  if [ $? -eq 0 ]; then
-    return 0
-  else
-    return 1
-  fi
-}
-
-
-# NAME
-#     create_directory
-#
-# USAGE
-#     create_directory <dir_name>
-#     create_directory <dir_name>  <dir_owner>
-#
-# DESCRIPTION
-#	  creates a directory on a local machine.
-#
-# PARAMETERS
-#	  PARAMETER: dir_name: The directory name that should be created
-#	  PARAMETER: dir_owner: The owner of that directory. If not passed, it will consider the student user
-#
-# RETURNS
-# 0 - If the directory was created successfully
-# 1 - If the directory was not created
-
-
-function create_directory
-{
-  local dir_name=$1
-  local owner=${2:-student}
-  remove_directory ${dir_name}
-  mkdir -p ${dir_name}
-  chown -R ${owner}:${owner} ${dir_name}
-  if [ -d "${dir_name}" ]
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-# NAME
-#     create_directory_rootless
-#
-# USAGE
-#     create_directory_rootless <dir_name>
-#
-# DESCRIPTION
-#	  creates a directory on a local machine.
-#
-# PARAMETERS
-#	  PARAMETER: dir_name: The directory name that should be created
-#
-# RETURNS
-# 0 - If the directory was created successfully
-# 1 - If the directory was not created
-
-function create_directory_rootless
-{
-  local dir_name=$1
-  local owner=student
-  remove_directory ${dir_name}
-  mkdir -pv ${dir_name}
-  chown -R ${owner}:${owner} ${dir_name}
-  if [ -d "${dir_name}" ]
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-
-# NAME
-#     change_ownership_rootless
-#
-# USAGE
-#     change_ownership_rootless <dir_name>
-#
-# DESCRIPTION
-#	  creates a directory on a local machine.
-#
-# PARAMETERS
-#	  PARAMETER: dir_name: The directory name that owner should be changed
-#
-
-
-function change_ownership_rootless
-{
-  local dir_name=$1
-  if sudo -u student podman unshare chown 27:27 $dir_name ; then
-      print_SUCCESS
-    else
-      print_FAIL
-    fi
-  
-}
-
-# NAME
-#     create_directory_remote
-#
-# USAGE
-#     create_directory_remote <server> <dir_name>
-#     create_directory_remote <server> <dir_name>  <dir_owner>
-#
-# DESCRIPTION
-#	  creates a directory on a local machine.
-#
-# PARAMETERS
-#	  PARAMETER: server: The machine's name where the dir will be created
-#	  PARAMETER: dir_name: The directory name that should be created
-#	  PARAMETER: dir_owner: The owner of that directory. If not passed, it will consider the student user
-#
-# RETURNS
-# 0 - If the directory was created successfully
-# 1 - If the directory was not created
-
-function create_directory_remote
-{
-  local server=$1
-  local dir_name=$2
-  local owner=${3:-student}
-  ssh root@${server} rm -rf ${dir_name}
-  ssh root@${server} mkdir -p ${dir_name}
-  ssh root@${server} chown -R ${owner}:${owner} ${dir_name}
-  if does_directory_exist_remote ${server} ${dir_name}
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-function change_owner
-{
-  local dir_name=$1
-  local owner=${2:-student}
-  chown -R ${owner}:${owner} ${dir_name}
-  if check_directory_owner ${dir_name} ${owner}
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-function change_owner_remote
-{
-  local server=$1
-  local dir_name=$2
-  local owner=${3:-student}
-  ssh root@${server} chown -R ${owner}:${owner} ${dir_name}
-  if check_directory_owner_remote ${server} ${dir_name} ${owner}
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-
-function does_directory_exists
-{
-  local base_dir=$1
-  local dir_name=$2
-  if [ -d "${base_dir}/${dir_name}" ]
-  then
-    return 0
-  else
-    return 1
-  fi
-}
-
-function does_file_exist
-{
-   local path=$1
-   if [ -f "${path}" ]
-   then
-     return 0
-   else
-     return 1
-   fi
-}
-
-
-function create_user
-{
-  local username=$1
-  if ! user_exists ${username}; then
-    useradd -r ${username}
-  fi
-	return 0
-}
-
-function remove_user
-{
-  local username=$1
-  if ! user_exists ${username}; then
-	return 1
-  fi
-  userdel ${username}
-  return 0
-}
-
-function user_exists
-{
-  local username=$1
-  if id -u ${username} >/dev/null 2>&1; then
-	return 0
-  else
-	return 1
-  fi
-}
-
-function user_exists_remote
-{
-  local username=$1
-  local remote=$2
-  if ssh root@${remote} id -u ${username} >/dev/null 2>&1; then
-	return 0
-  else
-	return 1
-  fi
-}
-
-function create_user_remote
-{
-  local username=$1
-  local server=$2
-  if ! user_exists_remote ${username} ${server}; then
-    ssh root@${server} useradd -r ${username}
-  fi
-  return 0
-}
-
-function remove_user_remote
-{
-  local username=$1
-  local server=$2
-  if user_exists_remote ${username} ${server}; then
-    ssh root@${server} userdel ${username}
-	return 0
-  else
-	return 1
-  fi
-}
-
-function check_directory_owner
-{
-  local directory=$1
-  local owner=$2
-  local base_dir=$(echo ${directory} | sed 's:/[^/]*$::')
-  local dir=$(echo ${directory} | rev | cut -d/ -f1 | rev)
-  if does_directory_exists $base_dir $dir; then
-    local check_owner=$(stat -c "%U" ${directory} | grep ${owner} | wc -l)
-	if [ $check_owner -eq 1 ]; then
-	  return 0
-	else
-	  return 1
-	fi
-  else
-	return 1
-  fi
-}
-
-
-function check_directory_owner_remote
-{
-  local server=$1
-  local directory=$2
-  local owner=$3
-  if does_directory_exist_remote ${server} ${directory}; then
-    local check_owner=$(ssh root@${server} stat -c "%U" ${directory} | grep ${owner} | wc -l)
-	if [ $check_owner -eq 1 ]; then
-	  return 0
-    else
-	  return 1
-    fi
-  else
-	return 1
-  fi
-
-
-}
-
-function ocp4_check_http_status {
-  local status="$1"
-  local url="$2"
-  # optional
-  local timeout="${3:-${TIMEOUT}}"
-
-  #echo "*** status: ${status}"
-  #echo "*** url: ${url}"
-  #curl --connect-timeout "${timeout}" -sk "${url}"
-
-  local http_status=$( curl --connect-timeout "${timeout}" -sk -L -o /dev/null -w '%{http_code}' "${url}" )
-  echo "*** http_status: ${http_status}"
-  test "${http_status}" = "${status}"
-}
-
-function ocp4_check_github_repo_exists {
-  local repo="$1"
-  # optional
-  local folder="$2"
-  local branch="$3"
-  local git_user="${4:-${RHT_OCP4_GITHUB_USER}}"
-  local timeout="${5:-${TIMEOUT}}"
-
-  if [ "${branch}" = "" ]; then
-    branch='master'
-  fi
-
-  #XXX the original check for 301 was broken: it did not detect missing repos
-  #echo "*** url: https://github.com/${git_user}/${repo}/tree/${branch}/${folder}"
-  ocp4_check_http_status '200' "https://github.com/${git_user}/${repo}/tree/${branch}/${folder}" "${timeout}"
-}
-
-function ocp4_fail_if_container_exists {
-  # vararg
-  local container="$1"
-
-  print_line ' Checking for conflicts with existing local containers:'
-  while [ "${container}" != '' ]
-  do
-
-    ocp4_pad "Container '${container}' is absent"
-    podman inspect --type container --format "{{.Id}}" "${container}"
-    success_if_NOT_equal $? 0
-
-    shift
-    container="$1"
-  done
-}
-
-function ocp4_verify_prereq_git_projects {
-  # vararg
-  local folder="$1"
-
-  while [ "${folder}" != "" ]
-  do
-
-    ocp4_pad "Project '${folder}' exists in student's GitHub fork"
-    ocp4_check_github_repo_exists "${COURSE_APPS}" "${folder}"
-    success_if_equal $? 0
-
-    shift
-    folder="$1"
-  done
-}
-
-function ocp4_print_prereq_header {
-  print_header "Checking prerequisites for ${title}"
-}
-
-
-function ocp4_print_setup_header {
-  print_header "Setting up the classroom for ${title}"
-}
-
-
-function ocp4_print_setup_footer {
-  print_line
-  pad 'Overall start status'
-
-  success_if_equal ${fail_count} 0
-  print_line
-}
-
-function ocp4_fail_if_project_exists {
-  # vararg
-  local project="$1"
-
-  print_line ' Checking for conflicts with existing OpenShift projects:'
-  while [ "${project}" != '' ]
-  do
-
-    ocp4_pad "Project '${project}' is absent"
-    ${oc} get project "${project}" -o name
-    success_if_NOT_equal $? 0
-
-    shift
-    project="$1"
-  done
-}
-
-function ocp4_is_cluster_up {
-
-  print_line ' Verifying the OpenShift cluster is running:'
-  ocp4_login_as_developer
-
-  #XXX Requires the rht-developer-cluster cluster role, see rht-developer.yaml and rht-developer-binding.yaml
-  for node in $(oc get node -o jsonpath="{.items[*].metadata.name}" -l node-role.kubernetes.io/master); do
-    ocp4_pad "Check master node ${node} is ready"
-    local status=$(oc get node ${node} -o jsonpath="{.status.conditions[?(@.type=='Ready')].status}")
-
-    success_if_equal "${status}" "True"
-  done
-
-  #XXX Requires the rht-developer-pod cluster role, see rht-developer.yaml and rht-developer-binding.yaml
-  ocp4_pad "Check the internal registry is up and running"
-  ocp4_check_pod_ready_and_running 'openshift-image-registry' 'docker-registry=default'
-  success_if_equal $? 0
-
-  #TODO which other checks should be done? router and registry? operators?
-  #TODO Check pods from deployment/cluster-image-registry-operator at openshift-image-registry ?
-  #TODO Check pods from deployment/image-registry at openshift-image-registry ? DONE
-  #TODO Check pods from deployment/ingress-operator at openshift-ingress-operator ?
-}
-
-function ocp4_exit_on_failure {
-  local msg="$1"
-
-  if [ ${fail_count} != 0 ]
-  then
-    print_line
-    pad 'Cannot continue due to the previous errors'
-    print_FAIL
-    if [ "${msg}" != "" ]
+function host_reachable {
+  local host
+  for host do
+    if [[ -z "${host}" ]] || 
+       ! ping -c 1 -w 2 "${host}" &> /dev/null ||
+       ! check_tcp_port "${host}" 22 &> /dev/null
     then
-        print_line "${msg}"
+      fatal 4 "${host} cannot be reached"
     fi
-    print_line
+  done
+}
+
+
+function grading_main_program {
+
+  if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
+    print_usage
+    exit 0
+  fi
+
+  # Check if to be run as root (must do this early)
+  if [[ "${run_as_root}" == 'true' && "${EUID}" -gt "0" ]] ; then
+    ${SUDO:-sudo} $0 "$@"
+    exit
+  fi
+
+  __log_on
+
+  # Parse the command line and validate command
+  cmd=''
+  for command in ${valid_commands[@]}; do
+    [[ "${1}" == "${command}" ]] && { cmd="${command}"; break; }
+  done
+  if [[ -z "${cmd}" ]]; then
+    warn "Missing or unrecognized command - ${1}"
+    print_usage 1>&3
     exit 1
   fi
-}
 
-function get_dependant {
-  local image="$1"
-
-  local all_images=""
-  for i in $(sudo podman images -q)
-  do
-    if sudo podman history $i | grep -q $image
-    then
-      all_images="${all_images} ${i}"
-    fi
-  done
-  echo "${all_images}"
-}
-
-function remove_dependant_images {
-  local image="$1"
-
-  local to_remove=""
-
-  iid=$(sudo podman images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep "$image" | awk '{print $2}' )
-
-  dependant=$(get_dependant $iid)
-
-  if [ -n "${dependant}" ]
+  myhost=$(hostname -s)
+  if [[ "${myhost}" != 'workstation' ]]
   then
-    podman_rm_image "${dependant}"
+    warn "Error: bad or missing hostname - ${myhost}"
+    fatal 2 'This command only runs on workstation.'
   fi
+
+  debug "STARTING lab_${cmd}"
+  lab_${cmd}
+  debug "lab_${cmd} - DONE"
+  [[ ${fail_count} -eq 0 ]]
+
 }
 
-function remove_dependant_images_rootless {
-  local image="$1"
-
-  local to_remove=""
-
-  iid=$(sudo -u student podman images --format "{{.Repository}}:{{.Tag}} {{.ID}}" | grep "$image" | awk '{print $2}' )
-
-  dependant=$(get_dependant_rootless $iid)
-
-  if [ -n "${dependant}" ]
-  then
-    podman_rm_image_rootless "${dependant}"
-  fi
-}
-
-function get_dependant_rootless {
-  local image="$1"
-
-  local all_images=""
-  for i in $(sudo -u student podman images -q)
-  do
-    if sudo -u student podman history $i | grep -q $image
-    then
-      all_images="${all_images} ${i}"
-    fi
-  done
-  echo "${all_images}"
-}
-
-# vim: ts=4 sw=2
+# vim: ai sw=2
