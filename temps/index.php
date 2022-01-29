@@ -3,43 +3,41 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-container-create - setup script for DO180
+#     lab-container-review - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-container-create {start|finish}
+#     lab-example {start|grade|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
+#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures the Guided Exercise: Creating a MySQL Database Instance
+#     This script configures the Lab: Creating Containerized Services
 #
 # CHANGELOG
 #   * Fri Mar 19 2021 Federico Fapitalle <ffapital@redhat.com>
 #   - run podman as the student user
-#   * Mon Nov 09 2020 Michael Phillips <miphilli@redhat.com>
-#   - altered the finish function again to revert to previous state (with the addition of --format '{{.ID}}')
-#   * Fri Nov 06 2020 Michael Phillips <miphilli@redhat.com>
-#   - adjusted the finish function to use grep instead of --filter.
-#   * Tue Jan 22 2019 Eduardo Ramirez <eramirez@redhat.com>
-#   - Update to OCP4
-#
-#   * Thu Apr 06 2017 Fernando Lozano <flozano@redhat.com>
+#   * Thu Jan 17 2019 Dan Kolepp <dkolepp@redhat.com>
+#   - Renamed script to conform with new standards.
+#   - New verbs are start, grade, finish,
+#      (no longer setup, grade, cleanup)
+#   * Fri Abr 06 2017 Fernando Lozano <flozano@redhat.com>
 #   - original code
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='container-create'
+this='container-review'
 target='workstation'
-title='Guided Exercise: Creating a MySQL database instance'
+title='Lab: Creating Containerized Services'
 
-# This defines which subcommands are supported (start, finish, etc.).
+# This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start finish)
+declare -a valid_commands=(start grade finish)
 
 # Additional functions for this grading script
 
@@ -59,27 +57,43 @@ function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
   check_podman_registry_config
-  pad " · Creating create_table.txt file"
-  mkdir -p ${solutions}/${this}
-  cat > ${solutions}/${this}/create_table.txt << EOF
-CREATE TABLE Projects (id int NOT NULL, name varchar(255) DEFAULT NULL, code varchar(255) DEFAULT NULL, PRIMARY KEY (id));
-EOF
-  if [ -d ${solutions}/${this} ] && [ -f ${solutions}/${this}/create_table.txt ]; then
-   chown -R ${user}:${user} ${solutions}/${this}
-   print_SUCCESS
-  else
-   print_FAIL
-  fi
+
+  grab_lab_files "false"
 }
+
+function lab_grade {
+  print_header "Grading the student's work for the ${title}"
+
+  pad " · The httpd container image was pulled"
+  num_images=$(sudo -u student podman images | grep "redhattraining/httpd-parent" | grep "2.4" | wc -l)
+  pass_if_NOT_equal "$num_images" "0"
+
+  pad " · The container was started with the correct name"
+  container_name=$(sudo -u student podman ps -a --format "{{ .Names }}" | grep "httpd-basic" | wc -l)
+  pass_if_NOT_equal "$container_name" "0"
+
+  pad " · The container was started with the correct image"
+  container=$(sudo -u student podman ps -a -f "name=httpd-basic" --format "{{ .Image }}" | grep "redhattraining/httpd-parent" | grep "2.4" | wc -l)
+  pass_if_NOT_equal "$container" "0"
+
+  pad " · Check the content of index.html"
+  page=$(curl -s http://localhost:8080/index.html | grep "Hello World" | wc -l)
+  pass_if_NOT_equal "$page" "0"
+
+  print_line
+}
+
+
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  pad ' · Removing "mysql-basic" container'
-  podman_rm_container_rootless "mysql-basic"
+  pad ' · Removing "httpd-basic" container'
+  podman_rm_container_rootless "httpd-basic"
 
-  pad ' · Removing "registry.redhat.io/rhel8/mysql-80:1" image'
-  podman_rm_image_rootless "registry.redhat.io/rhel8/mysql-80:1"
+  #Remove image from local cache?
+  pad ' · Removing "redhattraining/httpd-parent:2.4" image'
+  podman_rm_image_rootless "redhattraining/httpd-parent:2.4"
 }
 
 ############### Don't EVER change anything below this line ###############
