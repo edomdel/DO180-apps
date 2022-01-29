@@ -3,51 +3,44 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-image-review - grading/setup script for DO180
+#    lab-manage-lifecycle - setup script for DO180
 #
 # SYNOPSIS
-#     lab-image-review {start|grade|finish}
+#     lab-manage-lifecycle {start|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
-#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures Lab: Managing Images (4.5)
+#     This script configures the Guided Exercise: Managing a MySQL Container
 #
 # CHANGELOG
-#   * Mon Nov 30 2020 Michael Phillips <miphilli@redhat.com>
-#   - Changed the finish function to remove the quay.io image instead of the docker.io image.
-#   * Wed Mar 13 2019 Jordi Sola <jordisola@redhat.com>
-#   - Added validation for removed image
+#   * Tue Mar 23 2021 Harpal Singh <harpasin@redhat.com>
+#   - Changed functions to stop, rm, rmi for rootless podman.
 #   * Thu Jan 31 2019 Jordi Sola <jordisola@redhat.com>
-#   - Updated to podman and renamed.
-#   * Wed Jun 13 2018 Razique Mahroua <rmahroua@redhat.com>
-#   - Reverts some changes after retrieval of the right image
-#   * Tue Jun 12 2018 Razique Mahroua <rmahroua@redhat.com>
-#   - Updates the images (Nginx -> Nginx)
-#   - Cleanup of the code
-#   * Fri Jun 08 2018 Artur Glogowski <aglogows@redhat.com>
-#   - Fixed for version 3.9
-#   * Wed Mar 29 2017 Ricardo Jun <jtaniguc@redhat.com>
-#   * Fri Mar 31 2017 Ricardo Jun <jtaniguc@redhat.com>
-#   - Fixed issues identified during peer review
+#   - Updated to use podman commands. Verbs refactoring.
+#   * Web Jun 2018 Artur Glogowski <aglogows@redhat.com>
+#   - changes related to version 3.9
+#   * Fri Mar 24 2017 Richard Allred <rallred@redhat.com>
+#   - original code
+
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='image-review'
+this="manage-lifecycle"
+title="Guided Excercise: Managing a MySQL Container"
 target='workstation'
-title='Lab: Managing Images'
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start grade finish)
+declare -a valid_commands=(start finish)
 
 # Additional functions for this grading script
+
 
 function print_usage {
   local problem_name=$(basename $0 | sed -e 's/^lab-//')
@@ -62,60 +55,38 @@ EOF
 }
 
 function lab_start {
-   print_header "Setting up ${target} for the ${title}"
+  print_header "Setting up ${target} for the ${title}"
 
   #Remove once workstation is configured with
   # registry.lab.example.com as a registry.
   check_podman_registry_config
 
-}
-
-function lab_grade {
-  print_header "Grading the student's work for the ${title}"
-
-  pad " · Nginx container image is pulled"
-  sudo -u student podman images | grep nginx > /dev/null
-  pass_if_equal $? 0
-
-  pad " · Container official-nginx is created"
-  sudo -u student podman ps -a | grep official-nginx > /dev/null
-  pass_if_equal $? 0
-
-  pad " · Container official-nginx is stopped"
-  sudo -u student podman ps | grep official-nginx > /dev/null
-  pass_if_NOT_equal $? 0
-
-  #When updated to Podman v1.0, we can move this to `sudo podman image exist`
-  pad " · Tag do180/mynginx:v1.0-SNAPSHOT is removed"
-  sudo -u student podman images | grep do180/mynginx | grep v1.0-SNAPSHOT > /dev/null
-  pass_if_NOT_equal $? 0
-
-  pad " · Tag do180/mynginx:v1.0 is created"
-  sudo -u student podman images | grep do180/mynginx | grep v1.0 > /dev/null
-  pass_if_equal $? 0
-
-  pad " · Container my-nginx is created and running"
-  sudo -u student podman ps | grep my-nginx > /dev/null
-  pass_if_equal $? 0
-
-  pad " · index.html is available with the custom content"
-  curl  --silent 127.0.0.1:8280  | grep Page &> /dev/null
-  pass_if_equal $? 0
-
+  grab_lab_files
 }
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  for container in official-nginx-dev official-nginx ; do
-    pad " · Stopping $container container" && podman_stop_container_rootless $container
-    pad " · Removing $container container" && podman_rm_container_rootless $container
-  done
+  pad " · Stopping 'mysql' container" && podman_stop_container_rootless mysql
+  pad " · Stopping 'mysql-2' container" && podman_stop_container_rootless mysql-2
 
-  for image in do180/mynginx:v1.0 quay.io/redhattraining/nginx:1.17 ; do
-    pad " · Removing $image image" && podman_rm_image_rootless $image
-  done
+  pad " · Removing 'mysql' container" && podman_rm_container_rootless mysql
+  pad " · Removing 'mysql-2' container" && podman_rm_container_rootless mysql-2
+  pad " · Removing 'mysql-db' container" && podman_rm_container_rootless mysql-db
 
+  pad " · Removing 'registry.redhat.io/rhel8/mysql-80:1' image" && podman_rm_image_rootless registry.redhat.io/rhel8/mysql-80:1
+  pad " · Removing the project directory"
+  if remove_directory /home/student/DO180/labs/manage-lifecycle; then
+    print_SUCCESS
+  else
+    print_FAIL
+  fi
+  pad " · Removing the solution directory"
+  if remove_directory /home/student/DO180/solutions/manage-lifecycle; then
+    print_SUCCESS
+  else
+    print_FAIL
+  fi
 }
 
 ############### Don't EVER change anything below this line ###############
