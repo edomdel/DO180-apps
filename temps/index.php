@@ -3,43 +3,43 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-comprehensive-review - DO180 Comprehensive Review Lab
+#     lab-container-create - setup script for DO180
 #
 # SYNOPSIS
-#     lab-comprehensive-review {start|grade|finish}
+#     lab-container-create {start|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
-#        grade   - checks that containers and images have been created successfully.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures the initial state of the lab with lab and solution files.
+#     This script configures the Guided Exercise: Creating a MySQL Database Instance
 #
 # CHANGELOG
+#   * Fri Mar 19 2021 Federico Fapitalle <ffapital@redhat.com>
+#   - run podman as the student user
+#   * Mon Nov 09 2020 Michael Phillips <miphilli@redhat.com>
+#   - altered the finish function again to revert to previous state (with the addition of --format '{{.ID}}')
 #   * Fri Nov 06 2020 Michael Phillips <miphilli@redhat.com>
-#   - fixed broken grading function: it always gave a grade of PASS
-#   * Mon Oct 14 2019 Jordi Sola <jordisola@redhat.com>
-#   - Moved to the shared cluster and quay.io
-#   * Wed Jun 13 2019 Michael Jarrett <mjarrett@redhat.com>
-#   - Updated Initialize and set some variables
-#   * Mon Mar 04 2019 Jordi Sola <jordisola@redhat.com>
-#   - Updated to Podman and OCP4
-#   * Wed Apr 05 2017 Jim Rigsbee <jrigsbee@redhat.com>
+#   - adjusted the finish function to use grep instead of --filter.
+#   * Tue Jan 22 2019 Eduardo Ramirez <eramirez@redhat.com>
+#   - Update to OCP4
+#
+#   * Thu Apr 06 2017 Fernando Lozano <flozano@redhat.com>
 #   - original code
 
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='comprehensive-review'
+this='container-create'
 target='workstation'
-title='Lab: Comprehensive Review Lab'
+title='Guided Exercise: Creating a MySQL database instance'
 
-# This defines which subcommands are supported (solve, reset, etc.).
+# This defines which subcommands are supported (start, finish, etc.).
 # Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start grade finish)
+declare -a valid_commands=(start finish)
 
 # Additional functions for this grading script
 
@@ -59,38 +59,28 @@ function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
   check_podman_registry_config
-
-  grab_lab_files "true"
-
-}
-
-function lab_grade {
-  print_header "Grading the student's work for the ${title}"
-
-  #TODO: Refactor this function; make more robust
-  local route=nexus-${RHT_OCP4_DEV_USER}-review.${RHT_OCP4_WILDCARD_DOMAIN}
-  pad " · Accessing Nexus web application"
-  if curl -f -s --connect-timeout 1 "$route/nexus/" | grep "Loading Nexus UI"
-  then
-    print_PASS
+  pad " · Creating create_table.txt file"
+  mkdir -p ${solutions}/${this}
+  cat > ${solutions}/${this}/create_table.txt << EOF
+CREATE TABLE Projects (id int NOT NULL, name varchar(255) DEFAULT NULL, code varchar(255) DEFAULT NULL, PRIMARY KEY (id));
+EOF
+  if [ -d ${solutions}/${this} ] && [ -f ${solutions}/${this}/create_table.txt ]; then
+   chown -R ${user}:${user} ${solutions}/${this}
+   print_SUCCESS
   else
-    print_FAIL
-    print_line "   --> Nexus does not appear to be running at: $route/nexus/ "
+   print_FAIL
   fi
 }
 
 function lab_finish {
-  print_header "Cleaning up the lab for ${title}"
+  print_header "Completing the ${title}"
 
-  pad " · Deleting OpenShift project ${RHT_OCP4_DEV_USER}-review" && delete_project ${RHT_OCP4_DEV_USER}-review
-  if [ $? -eq 0 ]; then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
+  pad ' · Removing "mysql-basic" container'
+  podman_rm_container_rootless "mysql-basic"
 
+  pad ' · Removing "registry.redhat.io/rhel8/mysql-80:1" image'
+  podman_rm_image_rootless "registry.redhat.io/rhel8/mysql-80:1"
 }
-
 
 ############### Don't EVER change anything below this line ###############
 
