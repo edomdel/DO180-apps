@@ -3,40 +3,40 @@
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-openshift-resources - grading/setup script for DO180
+#     lab-troubleshoot-container - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-openshift-resources {start|finish}
+#     lab-basic-apache {setup|grade|reset}
 #
-#        start   - configures the environment at the start
-#                  of a lab or exercise.
-#        finish  - executes any administrative tasks after
-#                  completion of a lab or exercise.
+#        start   - configures the environment at the start of a lab or exercise.
+#        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script is for the GE 'Deploying a Database Server on OpenShift'
+#     This script is for the GE 'Configuring Apache Container Logs for Debugging'
 #
 # CHANGELOG
-#   * Fri Feb 15 2019 Michael Jarrett <mjarrett@redhat.com>
-#   - Updated to version 4.0
-#   * Mon Jun 11 2018 Artur Glogowski <aglogows@redhat.com>
-#   - Updated to version 3.9
-#   * Fri Apr 7 2017 Ravi Srinivasan <ravis@redhat.com>
+#   * Tue Mar 31 2021 Harpal Singh <harpasin@redhat.com>
+#   - Changed functions to stop, rm, rmi for rootless podman.
+#   * Tue Mar 05 2019 Eduardo Ramirez <eramirez@redhat.com>
+#   - Update to OCP 4.0
+#
+#   * Wed Apr 11 2017 Ravi Srinivasan <ravis@redhat.com>
 #   - Updated for DO180
 #   - Removed solve verb
 #
 #   * Sun Jan 10 2016 Zach Gutterman <zgutterm@redhat.com>
 #   - original code from DO276
 
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='openshift-resources'
+this='troubleshoot-container'
 target='workstation'
-title='Guided Exercise: Deploying a Database Server on OpenShift'
+title='Guided Excercise: Configuring Apache Container Logs for Debugging'
+
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
 declare -a valid_commands=(start finish)
@@ -58,22 +58,25 @@ EOF
 function lab_start {
   print_header "Setting up ${target} for the ${title}"
 
-  ocp4_is_cluster_up
+  check_podman_registry_config
 
-  pad " · Ensuring the '${RHT_OCP4_DEV_USER}-mysql-openshift' project is absent"
-  delete_project "${RHT_OCP4_DEV_USER}-mysql-openshift"
-  success_if_equal $? 0
+  grab_lab_files
 }
-
-
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  pad " · Deleting the '${RHT_OCP4_DEV_USER}-mysql-openshift' project"
-  delete_project "${RHT_OCP4_DEV_USER}-mysql-openshift"
-  success_if_equal $? 0
+  pad " · Stopping the troubleshoot-container container"
+  podman_stop_container_rootless troubleshoot-container
 
+  pad " · Removing the troubleshoot-container container"
+  podman_rm_container_rootless troubleshoot-container
+
+  pad " · Removing the troubleshoot-container container image"
+  podman_rm_image_rootless troubleshoot-container
+
+  pad " · Removing redhattraining/httpd-parent container image"
+  podman_rm_image_rootless httpd-parent
 }
 
 ############### Don't EVER change anything below this line ###############
@@ -88,35 +91,41 @@ grading_main_program "$@"
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-openshift-review - DO180 Deploy Containerized App on OpenShift
+#     lab-troubleshoot-review - lab script for DO180 for Ch08 Lab.
 #
 # SYNOPSIS
-#     lab-openshift {start|grade|finish}
+#     lab-troubleshoot-review {start|grade|finish}
 #
 #        start   - configures the environment at the start of a lab or exercise.
-#        grade   - checks that containers and images have been created successfully.
+#        grade   - checks that lab tasks are correctly executed.
 #        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script is for lab 6.11
+#     This script configures Ch08 Final Lab Troubleshooting Containerized Applications
 #
 # CHANGELOG
-#   * Wen Feb 20 2019 Eduardo Ramirez <eramirez@redhat.com>
-#   - Updated to OCP 4.0
-#   * Mon Jun 18 2018 Artur Glogowski <aglogows@redhat.com>
-#   - updated to version 3.9
-#   * Mon Apr 10 2017 Jim Rigsbee <jrigsbee@redhat.com>
+#   * Wed Jun 12 2019 Michael Jarrett <mjarrett@redhat.com>
+#   - updated application route
+#   * Thu Feb 28 2018 Dan Kolepp <dkolepp@redhat.com>
+#   - changed lab name from lab-troubleshooting-lab to
+#     lab-troubleshoot-review, to match DocBook standards.
+#   - Updated verbs from setup/grade/cleanup, to start/grade/finish
+#   * Thu Jun 2018 Razique Mahroua <rmahroua@redhat.com>
+#   - updates and cleans the code
+#   * Thu Apr 20 2017 Ricardo Jun <jtaniguc@redhat.com>
 #   - original code
 
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='openshift-review'
+this='troubleshoot-review'
 target='workstation'
-title='Lab: Deploying Containerized Applications on OpenShift'
+title='Lab: Troubleshooting Containerized Applications'
+project_name=do180-apps
+
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
@@ -137,244 +146,55 @@ EOF
 }
 
 function lab_start {
-  print_header "Setting up ${target} for the ${title}"
-
+  ocp4_print_prereq_header
+  ocp4_verify_local_clone_exist
+  ocp4_verify_prereq_git_projects 'nodejs-app'
+  ocp4_fail_if_project_exists "${RHT_OCP4_DEV_USER}-nodejs-app"
+  ocp4_fail_if_container_exists 'test'
   ocp4_is_cluster_up
 
-  pad " · Ensuring the '${RHT_OCP4_DEV_USER}-ocp' project does not exist"
-  delete_project "${RHT_OCP4_DEV_USER}-ocp"
-  if [ $? -eq 0 ]; then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-
-  print_line
+  ocp4_print_setup_header
+  grab_lab_files
+  ocp4_print_setup_footer
 }
 
 function lab_grade {
   print_header "Grading the student's work for the ${title}"
 
-  ocp4_login_as_developer
-
-  pad "Accessing the web application"
-  local fqdn=$(find_route_fqdn2)
-  curl -f -s --connect-timeout 1 "http://${fqdn}" | grep "Converting"
-  if [ $? == "0" ]; then
-    print_PASS
+  pad " · The nodejs-dev application response is correct"
+  local app_url="nodejs-dev-${RHT_OCP4_DEV_USER}-nodejs-app.${RHT_OCP4_WILDCARD_DOMAIN}"
+  curl -f $app_url
+  if [ $? -eq 0 ]; then
+    curl $app_url | grep "Hello World from pod: nodejs-dev"
+    if [ $? -eq 0 ]; then
+      print_PASS
+    else
+      print_FAIL
+      print_line "Hello World response not received;"
+      print_line "Instead, received the following response from $app_url: "
+      print_line "$(curl $app_url)"
+    fi
   else
     print_FAIL
-    print_line "   --> Unable to access: $fqdn"
+    print_line "Unable to access the application URL: $app_url"
   fi
 
+  print_line
 }
+
+
 
 function lab_finish {
   print_header "Completing the ${title}"
 
   ocp4_login_as_developer
-
-  pad " · Deleting the ${RHT_OCP4_DEV_USER}-ocp project"
-
-  delete_project "${RHT_OCP4_DEV_USER}-ocp"
+  pad " · Deleting the '${RHT_OCP4_DEV_USER}-nodejs-app' OpenShift project"
   if [ $? -eq 0 ]; then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-
-}
-
-function find_route_fqdn2 {
-  #local stmt=$(${oc} get route temps | tail -n1 | awk '{print $2}')
-  local stmt=$(${oc} get route temps -o template --template='{{.spec.host}}')
-  echo $stmt
-}
-
-
-function find_route_fqdn {
-  local stmt=$(${oc} describe route temps | grep Host)
-  IFS=':' read -ra FQDN <<< "$stmt"
-  echo "${FQDN[1]}" | tr -d [:space:]
-}
-
-############### Don't EVER change anything below this line ###############
-
-# Source library of functions
-source /usr/local/lib/labtool.shlib
-source /usr/local/lib/labtool.do180.shlib
-
-grading_main_program "$@"
-#!/usr/bin/bash
-#
-# Copyright 2021 Red Hat, Inc.
-#
-# NAME
-#     lab-openshift-routes - DO180 Exposing a Service as a Route
-#
-# SYNOPSIS
-#     lab-openshift-routes {start|finish}
-#
-#        start   - configures the environment at the start of a lab or exercise.
-#        finish  - executes any administrative tasks after completion of a lab or exercise.
-#
-#     All functions only work on workstation
-#
-# DESCRIPTION
-#     This script configures the initial state of the lab with lab and solution files.
-#
-# CHANGELOG
-#   * Mon Feb 19 2019 Jordi Sola <jordisola@redhat.com>
-#   - Updated to OCP.4
-#   * Fri Jun 15 2018 Artur Glogowski <aglogows@redhat.com>
-#   - updated to version 3.9
-#   * Sun Apr 09 2017 Jim Rigsbee <jrigsbee@redhat.com>
-#   - original code
-
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
-
-# Initialize and set some variables
-run_as_root='true'
-this='openshift-routes'
-target='workstation'
-title='Guided Exercise: Exposing a Service as a Route'
-
-# This defines which subcommands are supported (solve, reset, etc.).
-# Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start finish)
-
-# Additional functions for this grading script
-
-function print_usage {
-  local problem_name=$(basename $0 | sed -e 's/^lab-//')
-  cat << EOF
-This script controls the setup and grading of this lab.
-Usage: lab ${problem_name} COMMAND
-       lab ${problem_name} -h|--help
-
-COMMAND is one of: ${valid_commands[@]}
-
-EOF
-}
-
-function lab_start {
-  print_header "Setting up ${target} for the ${title}"
-
-  ocp4_is_cluster_up
-
-  pad " · Ensuring the '${RHT_OCP4_DEV_USER}-route' project does not exist"
-  delete_project "${RHT_OCP4_DEV_USER}-route"
-  success_if_equal $? 0
-}
-
-
-function lab_finish {
-  print_header "Completing the ${title}"
-
-  pad " · Removing OpenShift project '${RHT_OCP4_DEV_USER}-route'"
-  delete_project "${RHT_OCP4_DEV_USER}-route"
-  success_if_equal $? 0
-
-}
-
-function find_route_fqdn {
-  local stmt=$(oc describe route xyz | grep Host)
-  IFS=':' read -ra FQDN <<< "$stmt"
-  echo "${FQDN[1]}" | tr -d [:space:]
-}
-
-############### Don't EVER change anything below this line ###############
-
-# Source library of functions
-source /usr/local/lib/labtool.shlib
-source /usr/local/lib/labtool.do180.shlib
-
-grading_main_program "$@"
-#!/usr/bin/bash
-#
-# Copyright 2021 Red Hat, Inc.
-#
-# NAME
-#     lab-openshift-s2i - DO180 Creating a Containerized Application with Source-to-Image
-#
-# SYNOPSIS
-#     lab-openshift-s2i {start|finish}
-#
-#        start   - configures the environment at the start of a lab or exercise.
-#        finish  - executes any administrative tasks after completion of a lab or exercise.
-#
-#     All functions only work on workstation
-#
-# DESCRIPTION
-#     This script configures the initial state of the lab with lab and solution files.
-#
-# CHANGELOG
-#   * Tue Dec 01 2020 Michael Phillips <miphilli@redhat.com>
-#   - start function does not need to grab lab files as they are unnecessary and the exercise has been modified to not look at them.
-#   * Thu Feb 14 2019 Eduardo Ramirez <eramirez@redhat.com>
-#   - Updated to OCP 4.0
-#   * Thu Jun 14 2018 Artur Glogowski
-#   - updated to version 3.9
-#   * Fri Apr 07 2017 Jim Rigsbee <jrigsbee@redhat.com>
-#   - original code
-
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
-
-# Initialize and set some variables
-run_as_root='true'
-this='openshift-s2i'
-target='workstation'
-title='Guided Excercise: Creating a Containerized Application with Source-to-Image'
-
-# This defines which subcommands are supported (solve, reset, etc.).
-# Corresponding lab_COMMAND functions must be defined.
-declare -a valid_commands=(start finish)
-
-project_name=php-helloworld
-git_repo="http://services.lab.example.com/${project_name}"
-
-# Additional functions for this grading script
-
-function print_usage {
-  local problem_name=$(basename $0 | sed -e 's/^lab-//')
-  cat << EOF
-This script controls the setup and grading of this lab.
-Usage: lab ${problem_name} COMMAND
-       lab ${problem_name} -h|--help
-
-COMMAND is one of: ${valid_commands[@]}
-
-EOF
-}
-
-function lab_start {
-  print_header "Setting up ${target} for the ${title}"
-
-  pad " · Installing the tree command"
-  sudo yum install -y tree
-  success_if_equal $? 0
-
-  ocp4_verify_local_clone_exist
-
-  ocp4_is_cluster_up
-
-  pad " · Ensuring the '${RHT_OCP4_DEV_USER}-s2i' project does not exist"
-  delete_project "${RHT_OCP4_DEV_USER}-s2i"
-  success_if_equal $? 0
-}
-
-function lab_finish {
-  print_header "Completing the ${title}"
-
-
-
-  ocp4_login_as_developer
-  pad " · Deleting the '${RHT_OCP4_DEV_USER}-s2i' project"
-  if [ $? -eq 0 ]; then
-    delete_project "${RHT_OCP4_DEV_USER}-s2i"
+    delete_project "${RHT_OCP4_DEV_USER}-nodejs-app"
     success_if_equal $? 0
   else
     print_FAIL
+    print_line "Unable to login to OpenShift."
   fi
 
 }
@@ -391,48 +211,47 @@ grading_main_program "$@"
 # Copyright 2021 Red Hat, Inc.
 #
 # NAME
-#     lab-openshift-webconsole - DO180 Creating an Application with the Web Console
+#     lab-troubleshoot-s2i - grading/setup script for DO180
 #
 # SYNOPSIS
-#     lab-openshift-webconsole {start|finish}
+#     lab-troubleshoot-s2i {start|finish}
 #
-#        start  - configures the environment at the start of a lab or exercise.
-#        finish - executes any administrative tasks after completion of a lab or exercise.
+#        start   - configures the environment at the start of a lab or exercise.
+#        finish  - executes any administrative tasks after completion of a lab or exercise.
 #
 #     All functions only work on workstation
 #
 # DESCRIPTION
-#     This script configures the initial state of the lab with lab and solution files.
+#     This script is for the GE 'Troubleshooting an OpenShift Build'
 #
 # CHANGELOG
-#   * Tue Feb 12 2019 Dan Kolepp <dkolepp@redhat.com>
-#   - updated to v.4.0
-#   - changed script verbs from (setup|cleanup), to (start|finish)
-#   * Mon Jun 18 2018 Artur Glogowski <aglogows@redhat.com>
-#   - updated to v.3.9
-#   * Sun Apr 09 2017 Jim Rigsbee <jrigsbee@redhat.com>
+#   * Wed Jun 12 2019 Michael Jarrett <mjarrett@redhat.com>
+#   - updated Initialize and set some variables
+#   * Tue Jun 19 2018 Razique Mahroua <rmahroua@redhat.com>
+#   - updates the script to work with the 3.9 course
+#   * Mon Apr 24 2017 Ricardo Jun <jtaniguc@redhat.com>
 #   - original code
 
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/sbin
 
 # Initialize and set some variables
 run_as_root='true'
-this='openshift-webconsole'
+this='troubleshoot-s2i'
 target='workstation'
-title='Guided Exercise: Creating an Application with the Web Console'
+title='Guided Exercise: Troubleshooting an OpenShift Build'
 
 # This defines which subcommands are supported (solve, reset, etc.).
 # Corresponding lab_COMMAND functions must be defined.
 declare -a valid_commands=(start finish)
 
-
+project_name=DO180-apps
 
 # Additional functions for this grading script
 
 function print_usage {
   local problem_name=$(basename $0 | sed -e 's/^lab-//')
   cat << EOF
-This script controls the start and finish of this exercise.
+This script controls the setup and reset of this lab.
 Usage: lab ${problem_name} COMMAND
        lab ${problem_name} -h|--help
 
@@ -442,50 +261,32 @@ EOF
 }
 
 function lab_start {
-  print_header "Setting up ${target} for the ${title}"
 
+  ocp4_print_prereq_header
+  ocp4_verify_local_clone_exist
+  ocp4_verify_prereq_git_projects 'nodejs-helloworld'
+  ocp4_fail_if_project_exists "${RHT_OCP4_DEV_USER}-nodejs"
+  ocp4_fail_if_container_exists 'test'
   ocp4_is_cluster_up
 
-  pad " · Ensuring the '${RHT_OCP4_DEV_USER}-console' project does not exist"
-  delete_project "${RHT_OCP4_DEV_USER}-console"
-  if [ $? -eq 0 ]; then
-    print_SUCCESS
-  else
-    print_FAIL
-  fi
-
-  #Creates more readable output
-  print_line
+  ocp4_print_setup_header
+  grab_lab_files
+  ocp4_print_setup_footer
 
 }
-
 
 function lab_finish {
   print_header "Completing the ${title}"
 
-  pad " · Ensure the '${RHT_OCP4_DEV_USER}-console' project is deleted "
-  delete_project "${RHT_OCP4_DEV_USER}-console"
+  ocp4_login_as_developer
+  pad " · Deleting the '${RHT_OCP4_DEV_USER}-nodejs' OpenShift project"
   if [ $? -eq 0 ]; then
-    print_SUCCESS
-  else
-    print_FAIL
+    delete_project "${RHT_OCP4_DEV_USER}-nodejs"
+    success_if_equal $? 0
   fi
 
-  print_line
 }
 
-
-function find_consoler_port {
-  local stmt=$(oc set env dc/router --list -n default | grep HTTP_PORT)
-  IFS='=' read -ra ROUTER <<< "$stmt"
-  echo "${ROUTER[1]}"
-}
-
-function find_console_fqdn {
-  local stmt=$(oc describe route php-helloworld -n console | grep Host)
-  IFS=':' read -ra FQDN <<< "$stmt"
-  echo "${FQDN[1]}" | tr -d [:space:]
-}
 ############### Don't EVER change anything below this line ###############
 
 # Source library of functions
